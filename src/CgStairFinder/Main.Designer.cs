@@ -33,7 +33,6 @@
             this.toolTip1 = new System.Windows.Forms.ToolTip(this.components);
             this.timer1 = new System.Windows.Forms.Timer(this.components);
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
-            this.linkLabel1 = new System.Windows.Forms.LinkLabel();
             this.listBox1 = new System.Windows.Forms.ListBox();
             this.flowLayoutPanel2 = new System.Windows.Forms.FlowLayoutPanel();
             this.button1 = new System.Windows.Forms.Button();
@@ -59,7 +58,6 @@
             this.tableLayoutPanel2.ColumnCount = 2;
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.tableLayoutPanel2.Controls.Add(this.linkLabel1, 0, 7);
             this.tableLayoutPanel2.Controls.Add(this.listBox1, 0, 3);
             this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel2, 0, 4);
             this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel1, 0, 2);
@@ -81,18 +79,6 @@
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
             this.tableLayoutPanel2.Size = new System.Drawing.Size(234, 261);
             this.tableLayoutPanel2.TabIndex = 14;
-            // 
-            // linkLabel1
-            // 
-            this.linkLabel1.AutoSize = true;
-            this.linkLabel1.Location = new System.Drawing.Point(3, 241);
-            this.linkLabel1.Name = "linkLabel1";
-            this.linkLabel1.Size = new System.Drawing.Size(68, 16);
-            this.linkLabel1.TabIndex = 18;
-            this.linkLabel1.TabStop = true;
-            this.linkLabel1.Text = "このアプリについて";
-            this.linkLabel1.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.LinkLabel1_LinkClicked);
-            // 
             // listBox1
             // 
             this.tableLayoutPanel2.SetColumnSpan(this.listBox1, 2);
@@ -157,7 +143,7 @@
             this.button3.Name = "button3";
             this.button3.Size = new System.Drawing.Size(71, 23);
             this.button3.TabIndex = 12;
-            this.button3.Text = "ウィンドウ表示";
+            this.button3.Text = "前面表示";
             this.button3.UseVisualStyleBackColor = true;
             this.button3.Click += new System.EventHandler(this.Button3_Click);
             // 
@@ -170,7 +156,6 @@
             this.button4.Text = "記録";
             this.button4.UseVisualStyleBackColor = true;
             this.button4.Click += new System.EventHandler(this.Button4_Click);
-            // 
             // linkLabel2
             // 
             this.linkLabel2.AutoSize = true;
@@ -222,7 +207,6 @@
             this.MinimumSize = new System.Drawing.Size(250, 300);
             this.Name = "Main";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Main_FormClosing);
             this.Load += new System.EventHandler(this.Main_Load);
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
@@ -246,6 +230,5 @@
         private System.Windows.Forms.ComboBox comboBox1;
         private System.Windows.Forms.ListBox listBox1;
         private System.Windows.Forms.Button button4;
-        private System.Windows.Forms.LinkLabel linkLabel1;
     }
 }

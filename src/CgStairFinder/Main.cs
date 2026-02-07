@@ -33,7 +33,6 @@ namespace CgStairFinder
 
         static readonly IDictionary<string, DetectLog> logs = new Dictionary<string, DetectLog>();
         static readonly Encoding CgMapNameEncoding = Encoding.GetEncoding(950);
-        static readonly Encoding Utf8WithBom = new UTF8Encoding(true);
 
         private static byte[] ReadNullTerminatedBytes(byte[] buffer)
         {
@@ -59,13 +58,75 @@ namespace CgStairFinder
                 return string.Empty;
             }
 
-            var path = Encoding.ASCII.GetString(bytes).Trim();
-            if (!string.IsNullOrWhiteSpace(path))
+            // Keep map path decoding aligned with pre-localization behavior.
+            return Encoding.Default.GetString(bytes).Trim();
+        }
+
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
             {
-                return path;
+                return string.Empty;
             }
 
-            return CgMapNameEncoding.GetString(bytes).Trim();
+            return path.Trim().Trim('\0').Replace('/', '\\');
+        }
+
+        private static FileInfo ResolveMapFile(string cgDir, byte[] mapFileBuffer)
+        {
+            var rawPath = NormalizePath(DecodeMapPath(mapFileBuffer));
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                return null;
+            }
+
+            var directPath = Path.IsPathRooted(rawPath)
+                ? rawPath
+                : Path.Combine(cgDir, rawPath);
+            var directFile = new FileInfo(directPath);
+            if (directFile.Exists)
+            {
+                return directFile;
+            }
+
+            var pathWithoutLeadingSlash = rawPath.TrimStart('\\');
+            var combinedWithoutLeadingSlash = new FileInfo(Path.Combine(cgDir, pathWithoutLeadingSlash));
+            if (combinedWithoutLeadingSlash.Exists)
+            {
+                return combinedWithoutLeadingSlash;
+            }
+
+            var mapDir = Path.Combine(cgDir, "map");
+            if (Directory.Exists(mapDir))
+            {
+                var fileName = Path.GetFileName(rawPath);
+                if (!string.IsNullOrWhiteSpace(fileName))
+                {
+                    var file = new DirectoryInfo(mapDir)
+                        .GetFiles(fileName, SearchOption.AllDirectories)
+                        .FirstOrDefault();
+                    if (file != null)
+                    {
+                        return file;
+                    }
+                }
+            }
+
+            return directFile;
+        }
+
+        private static FileInfo GetLatestMapFile(string cgDir)
+        {
+            var mapDir = $@"{cgDir}\map";
+            if (!Directory.Exists(mapDir))
+            {
+                return null;
+            }
+
+            return new DirectoryInfo(mapDir)
+                .GetFiles("*.dat", SearchOption.AllDirectories)
+                .OrderByDescending(f => f.LastWriteTime)
+                .FirstOrDefault();
         }
 
         private void Main_Load(object sender, EventArgs e)
@@ -186,22 +247,24 @@ namespace CgStairFinder
                     // 取當前地圖檔名
                     var readMapFileBuffer = new byte[32];
                     ReadProcessMemory(hProcess.Value, 0x18CCC8, readMapFileBuffer, readMapFileBuffer.Length, 0);
-                    var path = DecodeMapPath(readMapFileBuffer);
-                    mapFile = new FileInfo(Path.Combine(Settings.Default.cgDir, path));
-                    if (!mapFile.Exists)
+                    mapFile = ResolveMapFile(Settings.Default.cgDir, readMapFileBuffer);
+                    if (mapFile == null || !mapFile.Exists)
                     {
-                        throw new Exception("マップファイルを読み取れません。");
+                        // Fallback for clients where current map path address is unavailable.
+                        mapFile = GetLatestMapFile(Settings.Default.cgDir);
                     }
                 }
                 else
                 {
-                    mapFile =
-                        new DirectoryInfo($@"{Settings.Default.cgDir}\map")
-                        .GetFiles("*.dat", SearchOption.AllDirectories)
-                        .OrderByDescending(f => f.LastWriteTime)
-                        .FirstOrDefault();
-                    Text = mapFile.Name;
+                    mapFile = GetLatestMapFile(Settings.Default.cgDir);
                 }
+
+                if (mapFile == null || !mapFile.Exists)
+                {
+                    throw new Exception("マップファイルを読み取れません。");
+                }
+
+                Text = string.IsNullOrWhiteSpace(mapName) ? mapFile.Name : mapName;
 
                 label2.Text = mapFile.FullName;
                 if (label2.Text.Length > 18)
@@ -366,8 +429,12 @@ namespace CgStairFinder
             foreach (var kv in logs.OrderBy(x => x.Value.DetectTime))
             {
                 var text = $"{kv.Value.DetectTime:yyyy-MM-dd HH:mm:ss} {kv.Key}";
-                var mapName = kv.Value.MapName;
-                text += $"({mapName})";
+                var recordMapName = kv.Value.MapName;
+                if (!string.IsNullOrWhiteSpace(recordMapName))
+                {
+                    text += $"({recordMapName})";
+                }
+
                 text += ": ";
                 text += string.Join(" | ", from a in kv.Value.CgStairs
                                            orderby a.Type
@@ -375,25 +442,8 @@ namespace CgStairFinder
                 sb.AppendLine(text);
             }
 
-            sb.AppendLine();
-            sb.AppendLine();
-            sb.AppendLine("powered by CgStairFinder (https://github.com/WindOfNet/CgStairFinder/releases/latest)");
-            File.WriteAllText(tmpPath, sb.ToString(), Utf8WithBom);
+            File.WriteAllText(tmpPath, sb.ToString(), new UTF8Encoding(true));
             Process.Start("notepad.exe", tmpPath);
-        }
-
-        private void Main_FormClosing(object sender, FormClosingEventArgs e)
-        {
-            if (logs.Count > 0)
-            {
-                e.Cancel = MessageBox.Show(this, "アプリを終了しますか？（記録は消去されます）", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.No;
-            }
-        }
-
-        private void LinkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-        {
-            Process.Start("https://github.com/WindOfNet/CgStairFinder");
         }
     }
 }
-
