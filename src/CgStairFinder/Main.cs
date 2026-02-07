@@ -373,29 +373,42 @@ namespace CgStairFinder
         /// </summary>
         private void ListBox_DrawItem(object sender, DrawItemEventArgs e)
         {
-            e.DrawBackground();
             if (e.Index == -1)
             {
                 return;
             }
 
-            Brush itemColor = Brushes.White;
-            if (((ListBox)sender).Items[e.Index].ToString().Contains(Defined.STAIR_TYPE_UP_DISPLAY_TEXT))
+            var text = ((ListBox)sender).Items[e.Index].ToString();
+            var fillColor = Color.White;
+            if (text.Contains(Defined.STAIR_TYPE_UP_DISPLAY_TEXT))
             {
-                itemColor = Brushes.SpringGreen;
+                fillColor = Color.FromArgb(220, 252, 231);
             }
-            else if (((ListBox)sender).Items[e.Index].ToString().Contains(Defined.STAIR_TYPE_DOWN_DISPLAY_TEXT))
+            else if (text.Contains(Defined.STAIR_TYPE_DOWN_DISPLAY_TEXT))
             {
-                itemColor = Brushes.OrangeRed;
+                fillColor = Color.FromArgb(254, 226, 226);
             }
-            else if (((ListBox)sender).Items[e.Index].ToString().Contains(Defined.STAIR_TYPE_MOVEABLE_DISPLAY_TEXT))
+            else if (text.Contains(Defined.STAIR_TYPE_MOVEABLE_DISPLAY_TEXT))
             {
-                itemColor = Brushes.Silver;
+                fillColor = Color.FromArgb(226, 232, 240);
             }
 
-            e.Graphics.FillRectangle(itemColor, e.Bounds);
-            e.Graphics.DrawString(((ListBox)sender).Items[e.Index].ToString(), Font, Brushes.Black, e.Bounds);
-            e.DrawFocusRectangle();
+            var rowRect = new Rectangle(e.Bounds.X + 3, e.Bounds.Y + 2, e.Bounds.Width - 6, e.Bounds.Height - 4);
+            using (var fillBrush = new SolidBrush(fillColor))
+            {
+                e.Graphics.FillRectangle(fillBrush, rowRect);
+            }
+
+            if ((e.State & DrawItemState.Selected) == DrawItemState.Selected)
+            {
+                using (var borderPen = new Pen(Color.FromArgb(59, 130, 246), 1))
+                {
+                    e.Graphics.DrawRectangle(borderPen, rowRect);
+                }
+            }
+
+            var textRect = new Rectangle(rowRect.X + 8, rowRect.Y + 2, rowRect.Width - 12, rowRect.Height - 2);
+            TextRenderer.DrawText(e.Graphics, text, Font, textRect, Color.FromArgb(15, 23, 42), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
         private void Button2_Click(object sender, EventArgs e)
