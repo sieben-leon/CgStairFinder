@@ -90,7 +90,7 @@
             this.linkLabel1.Size = new System.Drawing.Size(68, 16);
             this.linkLabel1.TabIndex = 18;
             this.linkLabel1.TabStop = true;
-            this.linkLabel1.Text = "關於本程式";
+            this.linkLabel1.Text = "このアプリについて";
             this.linkLabel1.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.LinkLabel1_LinkClicked);
             // 
             // listBox1
@@ -124,7 +124,7 @@
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(86, 23);
             this.button1.TabIndex = 7;
-            this.button1.Text = "開始偵測";
+            this.button1.Text = "検出を開始";
             this.button1.UseVisualStyleBackColor = true;
             this.button1.Click += new System.EventHandler(this.Button1_Click);
             // 
@@ -147,7 +147,7 @@
             this.button2.Name = "button2";
             this.button2.Size = new System.Drawing.Size(71, 23);
             this.button2.TabIndex = 4;
-            this.button2.Text = "刷新";
+            this.button2.Text = "更新";
             this.button2.UseVisualStyleBackColor = true;
             this.button2.Click += new System.EventHandler(this.Button2_Click);
             // 
@@ -157,7 +157,7 @@
             this.button3.Name = "button3";
             this.button3.Size = new System.Drawing.Size(71, 23);
             this.button3.TabIndex = 12;
-            this.button3.Text = "偵測視窗";
+            this.button3.Text = "ウィンドウ表示";
             this.button3.UseVisualStyleBackColor = true;
             this.button3.Click += new System.EventHandler(this.Button3_Click);
             // 
@@ -167,7 +167,7 @@
             this.button4.Name = "button4";
             this.button4.Size = new System.Drawing.Size(55, 23);
             this.button4.TabIndex = 13;
-            this.button4.Text = "紀錄";
+            this.button4.Text = "記録";
             this.button4.UseVisualStyleBackColor = true;
             this.button4.Click += new System.EventHandler(this.Button4_Click);
             // 
@@ -181,7 +181,7 @@
             this.linkLabel2.Size = new System.Drawing.Size(228, 16);
             this.linkLabel2.TabIndex = 5;
             this.linkLabel2.TabStop = true;
-            this.linkLabel2.Text = "資料夾路徑";
+            this.linkLabel2.Text = "フォルダパス";
             this.linkLabel2.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             this.linkLabel2.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.LinkLabel2_LinkClicked);
             // 
@@ -214,7 +214,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(234, 261);
             this.Controls.Add(this.tableLayoutPanel2);
-            this.Font = new System.Drawing.Font("微軟正黑體", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(136)));
+            this.Font = new System.Drawing.Font("Meiryo UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.MaximizeBox = false;

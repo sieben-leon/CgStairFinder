@@ -32,6 +32,41 @@ namespace CgStairFinder
         #endregion
 
         static readonly IDictionary<string, DetectLog> logs = new Dictionary<string, DetectLog>();
+        static readonly Encoding CgMapNameEncoding = Encoding.GetEncoding(950);
+        static readonly Encoding Utf8WithBom = new UTF8Encoding(true);
+
+        private static byte[] ReadNullTerminatedBytes(byte[] buffer)
+        {
+            return buffer.TakeWhile(x => x != 0).ToArray();
+        }
+
+        private static string DecodeMapName(byte[] buffer)
+        {
+            var bytes = ReadNullTerminatedBytes(buffer);
+            if (bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return CgMapNameEncoding.GetString(bytes).Trim();
+        }
+
+        private static string DecodeMapPath(byte[] buffer)
+        {
+            var bytes = ReadNullTerminatedBytes(buffer);
+            if (bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var path = Encoding.ASCII.GetString(bytes).Trim();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+
+            return CgMapNameEncoding.GetString(bytes).Trim();
+        }
 
         private void Main_Load(object sender, EventArgs e)
         {
@@ -45,7 +80,7 @@ namespace CgStairFinder
 
             if (string.IsNullOrEmpty(cgDir))
             {
-                linkLabel2.Text = "未設定魔力寶貝目錄";
+                linkLabel2.Text = "ゲームフォルダが未設定です";
                 return;
             }
 
@@ -57,7 +92,7 @@ namespace CgStairFinder
         {
             FolderBrowserDialog folderSelectionDialog = new FolderBrowserDialog
             {
-                Description = "選擇魔力寶貝資料夾"
+                Description = "ゲームフォルダを選択"
             };
 
             folderSelectionDialog.ShowDialog();
@@ -69,7 +104,7 @@ namespace CgStairFinder
         private void CgListReload(bool selectFirstItem)
         {
             comboBox1.Items.Clear();
-            comboBox1.Items.Add("不選擇視窗");
+            comboBox1.Items.Add("ウィンドウ未選択");
             comboBox1.Items.AddRange(Process.GetProcessesByName("bluecg"));
             comboBox1.Items.AddRange(Process.GetProcessesByName("bluehd"));
             comboBox1.Items.AddRange(Process.GetProcessesByName("cg"));
@@ -92,7 +127,7 @@ namespace CgStairFinder
             if (string.IsNullOrEmpty(cgDir) ||
                 !Directory.Exists($@"{cgDir}\map"))
             {
-                MessageBox.Show(this, "啟動失敗, 請確認路徑是否正確", "訊息", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "起動に失敗しました。パスが正しいか確認してください。", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -103,7 +138,7 @@ namespace CgStairFinder
         {
             timer1.Interval = 10;
             timer1.Start();
-            button1.Text = "停止偵測";
+            button1.Text = "検出を停止";
             button2.Enabled = false;
             comboBox1.Enabled = false;
         }
@@ -113,7 +148,7 @@ namespace CgStairFinder
             timer1.Stop();
             label2.ResetText();
             listBox1.Items.Clear();
-            button1.Text = "開始偵測";
+            button1.Text = "検出を開始";
             button2.Enabled = true;
             comboBox1.Enabled = true;
         }
@@ -138,7 +173,7 @@ namespace CgStairFinder
                     var p = (Process)comboBox1.SelectedItem;
                     if (p.HasExited)
                     {
-                        throw new Exception("視窗偵測失敗");
+                        throw new Exception("ウィンドウの検出に失敗しました。");
                     }
 
                     hProcess = OpenProcess(0x1F0FFF, false, p.Id);
@@ -146,16 +181,16 @@ namespace CgStairFinder
                     // 取地圖名
                     var readMapNameBuffer = new byte[32];
                     ReadProcessMemory(hProcess.Value, 0x95C870, readMapNameBuffer, readMapNameBuffer.Length, 0);
-                    mapName = Encoding.Default.GetString(readMapNameBuffer.TakeWhile(x => x != 0).ToArray());
+                    mapName = DecodeMapName(readMapNameBuffer);
 
                     // 取當前地圖檔名
                     var readMapFileBuffer = new byte[32];
                     ReadProcessMemory(hProcess.Value, 0x18CCC8, readMapFileBuffer, readMapFileBuffer.Length, 0);
-                    var path = Encoding.Default.GetString(readMapFileBuffer.TakeWhile(x => x != 0).ToArray());
+                    var path = DecodeMapPath(readMapFileBuffer);
                     mapFile = new FileInfo(Path.Combine(Settings.Default.cgDir, path));
                     if (!mapFile.Exists)
                     {
-                        throw new Exception("無法讀取地圖檔");
+                        throw new Exception("マップファイルを読み取れません。");
                     }
                 }
                 else
@@ -183,7 +218,7 @@ namespace CgStairFinder
 
                 if (cgStairs.Count == 0)
                 {
-                    listBox1.Items.Add("沒有找到任何樓梯");
+                    listBox1.Items.Add("階段が見つかりませんでした。");
                     return;
                 }
 
@@ -194,7 +229,7 @@ namespace CgStairFinder
                     var type = CgStair.Translate(c.Type);
                     if (!isSelectdWindow)
                     {
-                        listBox1.Items.Add($"東{c.East}, 南{c.South} -- {type}");
+                        listBox1.Items.Add($"東{c.East}、南{c.South} -- {type}");
                         continue;
                     }
 
@@ -252,14 +287,14 @@ namespace CgStairFinder
                         #endregion
                     }
 
-                    listBox1.Items.Add($"東{c.East}, 南{c.South} {direction} -- {type}");
+                    listBox1.Items.Add($"東{c.East}、南{c.South} {direction} -- {type}");
                 }
             }
             catch (IOException) { return; }
             catch (Exception ex)
             {
                 Stop();
-                MessageBox.Show(this, $"發生錯誤, 自動偵測已停止\n\n{ex.Message}", "訊息", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, $"エラーが発生したため自動検出を停止しました。\n\n{ex.Message}", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             finally
             {
@@ -321,7 +356,7 @@ namespace CgStairFinder
         {
             if (!logs.Any())
             {
-                MessageBox.Show("沒有任何紀錄", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("記録がありません。", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -343,7 +378,7 @@ namespace CgStairFinder
             sb.AppendLine();
             sb.AppendLine();
             sb.AppendLine("powered by CgStairFinder (https://github.com/WindOfNet/CgStairFinder/releases/latest)");
-            File.WriteAllText(tmpPath, sb.ToString());
+            File.WriteAllText(tmpPath, sb.ToString(), Utf8WithBom);
             Process.Start("notepad.exe", tmpPath);
         }
 
@@ -351,7 +386,7 @@ namespace CgStairFinder
         {
             if (logs.Count > 0)
             {
-                e.Cancel = MessageBox.Show(this, "是否要結束程式？ (紀錄將會清除)", "提示", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.No;
+                e.Cancel = MessageBox.Show(this, "アプリを終了しますか？（記録は消去されます）", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.No;
             }
         }
 
@@ -361,3 +396,4 @@ namespace CgStairFinder
         }
     }
 }
+

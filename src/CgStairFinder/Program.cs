@@ -8,7 +8,7 @@ namespace CgStairFinder
     static class Program
     {
         /// <summary>
-        /// 應用程式的主要進入點。
+        /// アプリケーションのメイン エントリ ポイントです。
         /// </summary>
         [STAThread]
         static void Main()
