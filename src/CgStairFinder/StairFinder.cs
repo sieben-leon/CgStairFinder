@@ -8,11 +8,11 @@ namespace CgStairFinder
     public enum StairType
     {
         [Description(Defined.STAIR_TYPE_UP_DISPLAY_TEXT)]
-        Up, // 上樓
+        Up, // 上り
         [Description(Defined.STAIR_TYPE_DOWN_DISPLAY_TEXT)]
-        Down, // 下樓
+        Down, // 下り
         [Description(Defined.STAIR_TYPE_MOVEABLE_DISPLAY_TEXT)]
-        Jump, // 可移動
+        Jump, // 移動可能
         [Description(Defined.STAIR_TYPE_UNKNOW_DISPLAY_TEXT)]
         Unknow
     }
@@ -32,6 +32,7 @@ namespace CgStairFinder
 
     public class CgMapStairFinder
     {
+        private const ushort StairFlagValue = 49155;
         private readonly MemoryStream ms;
 
         public CgMapStairFinder(FileInfo file)
@@ -45,7 +46,7 @@ namespace CgStairFinder
 
         static StairType GetStType(ushort gnum)
         {
-            // 從物件編號(gnum)得知物件圖片(從bin取出)是上樓或下樓
+            // オブジェクト番号(gnum)から階段種別を判定
             switch (gnum)
             {
                 case 12000:
@@ -143,51 +144,78 @@ namespace CgStairFinder
             }
         }
 
-        public IList<CgStair> GetStairs()
+        public sealed class CgMapData
+        {
+            public int Width { get; set; }
+            public int Height { get; set; }
+            public IList<CgStair> Stairs { get; set; }
+            public ushort[] GroundIds { get; set; }
+            public ushort[] ObjectIds { get; set; }
+            public ushort[] Flags { get; set; }
+        }
+
+        private static ushort[] ReadSection(BinaryReader br, int cellCount)
+        {
+            var values = new ushort[cellCount];
+            for (var i = 0; i < cellCount; i++)
+            {
+                values[i] = br.ReadUInt16();
+            }
+
+            return values;
+        }
+
+        public CgMapData GetMapData()
         {
             var result = new List<CgStair>();
+            ushort[] groundIds;
+            ushort[] objectIds;
+            ushort[] flags;
 
-            // http://cgsword.com/filesystem_graphicmap.htm#mapdat 地圖檔解析
-            int width, height, sectionOffset;
+            // http://cgsword.com/filesystem_graphicmap.htm#mapdat の形式で地図ファイルを解析
+            int width, height;
             using (ms)
             using (var br = new BinaryReader(ms))
             {
-                // 檔頭的頭3字節為固定字符MAP，隨後9字節均為0/空白
+                // 先頭3バイトは固定文字列 MAP、続く9バイトは0/空白
                 // start: 12
                 ms.Seek(12, SeekOrigin.Begin);
-                // 2個DWORD(4字節)的數據，第1個表示地圖長度-東(W)，第2個表示地圖長度-南(H)
+                // 2つのDWORD(4バイト): 1つ目が幅(東)、2つ目が高さ(南)
                 width = br.ReadInt32();
                 height = br.ReadInt32();
-                // 每個數據塊的 section
-                sectionOffset = width * height * 2;
+                var cellCount = width * height;
+                groundIds = ReadSection(br, cellCount);
+                objectIds = ReadSection(br, cellCount);
+                flags = ReadSection(br, cellCount);
 
                 for (var i = 0; i < height; i++)
                 {
                     for (var j = 0; j < width; j++)
                     {
-                        // 移到場景轉換數據塊
-                        ms.Seek(20 + (j + i * width) * 2, SeekOrigin.Begin);
-                        ms.Seek(sectionOffset * 2, SeekOrigin.Current);
-
-                        /*
-                         * 49154 怪物?
-                         * 49155 迷宮樓梯
-                         * 49162 可過地圖
-                         * 49163 法蘭城租屋
-                         */
-                        var target = br.ReadUInt16();
-                        if (target == 49155)
+                        var idx = j + i * width;
+                        if (flags[idx] == StairFlagValue)
                         {
-                            // 回物件數據塊取樓梯編號
-                            ms.Seek(-sectionOffset - 2, SeekOrigin.Current);
-                            var gnum = br.ReadUInt16();
+                            var gnum = objectIds[idx];
                             result.Add(new CgStair { East = j, South = i, Type = GetStType(gnum) });
                         }
                     }
                 }
             }
 
-            return result;
+            return new CgMapData
+            {
+                Width = width,
+                Height = height,
+                Stairs = result,
+                GroundIds = groundIds,
+                ObjectIds = objectIds,
+                Flags = flags
+            };
+        }
+
+        public IList<CgStair> GetStairs()
+        {
+            return GetMapData().Stairs;
         }
     }
 }

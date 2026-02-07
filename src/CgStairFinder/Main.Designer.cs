@@ -40,9 +40,12 @@
             this.button2 = new System.Windows.Forms.Button();
             this.button3 = new System.Windows.Forms.Button();
             this.button4 = new System.Windows.Forms.Button();
+            this.checkBoxShowTerrain = new System.Windows.Forms.CheckBox();
             this.linkLabel2 = new System.Windows.Forms.LinkLabel();
             this.label2 = new System.Windows.Forms.Label();
             this.comboBox1 = new System.Windows.Forms.ComboBox();
+            this.pictureBoxMap = new System.Windows.Forms.PictureBox();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxMap)).BeginInit();
             this.tableLayoutPanel2.SuspendLayout();
             this.flowLayoutPanel2.SuspendLayout();
             this.flowLayoutPanel1.SuspendLayout();
@@ -57,9 +60,10 @@
             // 
             this.tableLayoutPanel2.BackColor = System.Drawing.Color.White;
             this.tableLayoutPanel2.ColumnCount = 2;
-            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 60F));
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 40F));
             this.tableLayoutPanel2.Controls.Add(this.listBox1, 0, 3);
+            this.tableLayoutPanel2.Controls.Add(this.pictureBoxMap, 1, 3);
             this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel2, 0, 4);
             this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel1, 0, 2);
             this.tableLayoutPanel2.Controls.Add(this.linkLabel2, 0, 0);
@@ -80,22 +84,33 @@
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(344, 365);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(420, 365);
             this.tableLayoutPanel2.TabIndex = 14;
             // listBox1
             // 
             this.listBox1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(249)))), ((int)(((byte)(251)))), ((int)(((byte)(255)))));
             this.listBox1.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.tableLayoutPanel2.SetColumnSpan(this.listBox1, 2);
             this.listBox1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.listBox1.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
             this.listBox1.FormattingEnabled = true;
             this.listBox1.ItemHeight = 22;
             this.listBox1.Location = new System.Drawing.Point(15, 96);
+            this.listBox1.Margin = new System.Windows.Forms.Padding(3, 3, 8, 3);
             this.listBox1.Name = "listBox1";
-            this.listBox1.Size = new System.Drawing.Size(314, 183);
+            this.listBox1.Size = new System.Drawing.Size(209, 183);
             this.listBox1.TabIndex = 15;
             this.listBox1.DrawItem += new System.Windows.Forms.DrawItemEventHandler(this.ListBox_DrawItem);
+            // 
+            // pictureBoxMap
+            // 
+            this.pictureBoxMap.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(249)))), ((int)(((byte)(251)))), ((int)(((byte)(255)))));
+            this.pictureBoxMap.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.pictureBoxMap.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.pictureBoxMap.Location = new System.Drawing.Point(240, 96);
+            this.pictureBoxMap.Name = "pictureBoxMap";
+            this.pictureBoxMap.Size = new System.Drawing.Size(89, 183);
+            this.pictureBoxMap.TabIndex = 16;
+            this.pictureBoxMap.TabStop = false;
             // 
             // flowLayoutPanel2
             // 
@@ -132,6 +147,7 @@
             this.flowLayoutPanel1.Controls.Add(this.button2);
             this.flowLayoutPanel1.Controls.Add(this.button3);
             this.flowLayoutPanel1.Controls.Add(this.button4);
+            this.flowLayoutPanel1.Controls.Add(this.checkBoxShowTerrain);
             this.flowLayoutPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.flowLayoutPanel1.Location = new System.Drawing.Point(15, 56);
             this.flowLayoutPanel1.Name = "flowLayoutPanel1";
@@ -176,6 +192,20 @@
             this.button4.Text = "記録";
             this.button4.UseVisualStyleBackColor = false;
             this.button4.Click += new System.EventHandler(this.Button4_Click);
+            // 
+            // checkBoxShowTerrain
+            // 
+            this.checkBoxShowTerrain.AutoSize = true;
+            this.checkBoxShowTerrain.Checked = true;
+            this.checkBoxShowTerrain.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.checkBoxShowTerrain.Location = new System.Drawing.Point(229, 7);
+            this.checkBoxShowTerrain.Name = "checkBoxShowTerrain";
+            this.checkBoxShowTerrain.Size = new System.Drawing.Size(75, 20);
+            this.checkBoxShowTerrain.TabIndex = 14;
+            this.checkBoxShowTerrain.Text = "地形表示";
+            this.checkBoxShowTerrain.UseVisualStyleBackColor = true;
+            this.checkBoxShowTerrain.CheckedChanged += new System.EventHandler(this.CheckBoxShowTerrain_CheckedChanged);
+            // 
             // linkLabel2
             // 
             this.linkLabel2.AutoSize = true;
@@ -222,14 +252,14 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(240)))), ((int)(((byte)(245)))), ((int)(((byte)(252)))));
-            this.ClientSize = new System.Drawing.Size(344, 365);
+            this.ClientSize = new System.Drawing.Size(420, 365);
             this.Controls.Add(this.tableLayoutPanel2);
             this.Font = new System.Drawing.Font("Meiryo UI", 9.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(4);
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.MinimumSize = new System.Drawing.Size(360, 404);
+            this.MinimumSize = new System.Drawing.Size(436, 404);
             this.Name = "Main";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Cg Stair Finder";
@@ -238,6 +268,7 @@
             this.tableLayoutPanel2.PerformLayout();
             this.flowLayoutPanel2.ResumeLayout(false);
             this.flowLayoutPanel1.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxMap)).EndInit();
             this.ResumeLayout(false);
 
         }
@@ -256,5 +287,7 @@
         private System.Windows.Forms.ComboBox comboBox1;
         private System.Windows.Forms.ListBox listBox1;
         private System.Windows.Forms.Button button4;
+        private System.Windows.Forms.CheckBox checkBoxShowTerrain;
+        private System.Windows.Forms.PictureBox pictureBoxMap;
     }
 }

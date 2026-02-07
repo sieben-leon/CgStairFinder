@@ -1,6 +1,5 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -13,126 +12,211 @@ namespace CgStairFinder
 {
     public partial class Main : Form
     {
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern int ShowWindow(IntPtr hwnd, int nCmdShow);
+
+        private static readonly IDictionary<string, DetectLog> logs = new Dictionary<string, DetectLog>();
+
+        private const float MiniMapZoomMin = 1f;
+        private const float MiniMapZoomMax = 8f;
+        private const float MiniMapZoomStep = 1.2f;
+
+        private CgMapStairFinder.CgMapData latestMapData;
+        private int? latestEast;
+        private int? latestSouth;
+        private string latestMapPath;
+
+        private float miniMapZoom = MiniMapZoomMin;
+        private float miniMapPanX;
+        private float miniMapPanY;
+        private bool miniMapDragging;
+        private Point miniMapDragStart;
+        private float miniMapDragStartPanX;
+        private float miniMapDragStartPanY;
+
+        private Button buttonRecenterMap;
+
         public Main()
         {
             InitializeComponent();
         }
 
-        #region dll import
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
-        [DllImport("user32.dll")]
-        private static extern int ShowWindow(IntPtr hwnd, int nCmdShow);
-        [DllImport("kernel32.dll")]
-        private static extern bool ReadProcessMemory(int hProcess, int lpBaseAddress, byte[] lpBuffer, int nSize, int lpNumberOfBytesRead);
-        [DllImport("kernel32.dll")]
-        private static extern int OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-        [DllImport("kernel32.dll")]
-        private static extern void CloseHandle(int hObject);
-        #endregion
-
-        static readonly IDictionary<string, DetectLog> logs = new Dictionary<string, DetectLog>();
-        static readonly Encoding CgMapNameEncoding = Encoding.GetEncoding(950);
-
-        private static byte[] ReadNullTerminatedBytes(byte[] buffer)
-        {
-            return buffer.TakeWhile(x => x != 0).ToArray();
-        }
-
-        private static string DecodeMapName(byte[] buffer)
-        {
-            var bytes = ReadNullTerminatedBytes(buffer);
-            if (bytes.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            return CgMapNameEncoding.GetString(bytes).Trim();
-        }
-
-        private static string DecodeMapPath(byte[] buffer)
-        {
-            var bytes = ReadNullTerminatedBytes(buffer);
-            if (bytes.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            // Keep map path decoding aligned with pre-localization behavior.
-            return Encoding.Default.GetString(bytes).Trim();
-        }
-
-        private static string NormalizePath(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return string.Empty;
-            }
-
-            return path.Trim().Trim('\0').Replace('/', '\\');
-        }
-
-        private static FileInfo ResolveMapFile(string cgDir, byte[] mapFileBuffer)
-        {
-            var rawPath = NormalizePath(DecodeMapPath(mapFileBuffer));
-            if (string.IsNullOrWhiteSpace(rawPath))
-            {
-                return null;
-            }
-
-            var directPath = Path.IsPathRooted(rawPath)
-                ? rawPath
-                : Path.Combine(cgDir, rawPath);
-            var directFile = new FileInfo(directPath);
-            if (directFile.Exists)
-            {
-                return directFile;
-            }
-
-            var pathWithoutLeadingSlash = rawPath.TrimStart('\\');
-            var combinedWithoutLeadingSlash = new FileInfo(Path.Combine(cgDir, pathWithoutLeadingSlash));
-            if (combinedWithoutLeadingSlash.Exists)
-            {
-                return combinedWithoutLeadingSlash;
-            }
-
-            var mapDir = Path.Combine(cgDir, "map");
-            if (Directory.Exists(mapDir))
-            {
-                var fileName = Path.GetFileName(rawPath);
-                if (!string.IsNullOrWhiteSpace(fileName))
-                {
-                    var file = new DirectoryInfo(mapDir)
-                        .GetFiles(fileName, SearchOption.AllDirectories)
-                        .FirstOrDefault();
-                    if (file != null)
-                    {
-                        return file;
-                    }
-                }
-            }
-
-            return directFile;
-        }
-
-        private static FileInfo GetLatestMapFile(string cgDir)
-        {
-            var mapDir = $@"{cgDir}\map";
-            if (!Directory.Exists(mapDir))
-            {
-                return null;
-            }
-
-            return new DirectoryInfo(mapDir)
-                .GetFiles("*.dat", SearchOption.AllDirectories)
-                .OrderByDescending(f => f.LastWriteTime)
-                .FirstOrDefault();
-        }
-
         private void Main_Load(object sender, EventArgs e)
         {
+            InitializeMiniMapInteractions();
             SetCgDirDisplayText();
             CgListReload(true);
+        }
+
+        private void InitializeMiniMapInteractions()
+        {
+            pictureBoxMap.TabStop = true;
+            pictureBoxMap.MouseEnter += PictureBoxMap_MouseEnter;
+            pictureBoxMap.MouseClick += PictureBoxMap_MouseClick;
+            pictureBoxMap.MouseWheel += PictureBoxMap_MouseWheel;
+            pictureBoxMap.MouseDown += PictureBoxMap_MouseDown;
+            pictureBoxMap.MouseMove += PictureBoxMap_MouseMove;
+            pictureBoxMap.MouseUp += PictureBoxMap_MouseUp;
+            pictureBoxMap.MouseLeave += PictureBoxMap_MouseLeave;
+            pictureBoxMap.Resize += PictureBoxMap_Resize;
+            toolTip1.SetToolTip(pictureBoxMap, "ホイールで拡大・縮小");
+
+            buttonRecenterMap = new Button
+            {
+                Text = "⌖",
+                Size = new Size(28, 28),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(241, 245, 249),
+                ForeColor = Color.FromArgb(30, 64, 175),
+                Visible = false,
+                TabStop = false
+            };
+            buttonRecenterMap.FlatAppearance.BorderColor = Color.FromArgb(148, 163, 184);
+            buttonRecenterMap.FlatAppearance.MouseOverBackColor = Color.FromArgb(226, 232, 240);
+            buttonRecenterMap.FlatAppearance.MouseDownBackColor = Color.FromArgb(203, 213, 225);
+            buttonRecenterMap.Click += ButtonRecenterMap_Click;
+            toolTip1.SetToolTip(buttonRecenterMap, "現在地を中央に戻す");
+            pictureBoxMap.Controls.Add(buttonRecenterMap);
+            PositionRecenterButton();
+        }
+
+        private void ButtonRecenterMap_Click(object sender, EventArgs e)
+        {
+            miniMapPanX = 0f;
+            miniMapPanY = 0f;
+            RefreshMiniMap();
+        }
+
+        private void PictureBoxMap_MouseEnter(object sender, EventArgs e)
+        {
+            pictureBoxMap.Focus();
+        }
+
+        private void PictureBoxMap_MouseClick(object sender, MouseEventArgs e)
+        {
+            pictureBoxMap.Focus();
+        }
+
+        private void PictureBoxMap_MouseWheel(object sender, MouseEventArgs e)
+        {
+            if (latestMapData == null || e.Delta == 0)
+            {
+                return;
+            }
+
+            var scale = e.Delta > 0 ? MiniMapZoomStep : 1f / MiniMapZoomStep;
+            miniMapZoom = Math.Max(MiniMapZoomMin, Math.Min(MiniMapZoomMax, miniMapZoom * scale));
+
+            if (Math.Abs(miniMapZoom - MiniMapZoomMin) < 0.001f)
+            {
+                miniMapZoom = MiniMapZoomMin;
+                miniMapPanX = 0f;
+                miniMapPanY = 0f;
+            }
+
+            RefreshMiniMap();
+        }
+
+        private void PictureBoxMap_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || !CanPanMiniMap())
+            {
+                return;
+            }
+
+            miniMapDragging = true;
+            miniMapDragStart = e.Location;
+            miniMapDragStartPanX = miniMapPanX;
+            miniMapDragStartPanY = miniMapPanY;
+            pictureBoxMap.Cursor = Cursors.SizeAll;
+        }
+
+        private void PictureBoxMap_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!miniMapDragging)
+            {
+                pictureBoxMap.Cursor = CanPanMiniMap() ? Cursors.Hand : Cursors.Default;
+                return;
+            }
+
+            var dx = e.X - miniMapDragStart.X;
+            var dy = e.Y - miniMapDragStart.Y;
+            miniMapPanX = miniMapDragStartPanX + dx;
+            miniMapPanY = miniMapDragStartPanY + dy;
+            RefreshMiniMap();
+        }
+
+        private void PictureBoxMap_MouseUp(object sender, MouseEventArgs e)
+        {
+            EndMiniMapDrag();
+        }
+
+        private void PictureBoxMap_MouseLeave(object sender, EventArgs e)
+        {
+            EndMiniMapDrag();
+        }
+
+        private void EndMiniMapDrag()
+        {
+            miniMapDragging = false;
+            pictureBoxMap.Cursor = CanPanMiniMap() ? Cursors.Hand : Cursors.Default;
+        }
+
+        private bool CanPanMiniMap()
+        {
+            return latestMapData != null &&
+                   miniMapZoom > MiniMapZoomMin + 0.001f &&
+                   latestEast.HasValue &&
+                   latestSouth.HasValue;
+        }
+
+        private void PictureBoxMap_Resize(object sender, EventArgs e)
+        {
+            PositionRecenterButton();
+            RefreshMiniMap();
+        }
+
+        private void PositionRecenterButton()
+        {
+            if (buttonRecenterMap == null)
+            {
+                return;
+            }
+
+            var x = Math.Max(4, pictureBoxMap.ClientSize.Width - buttonRecenterMap.Width - 4);
+            buttonRecenterMap.Location = new Point(x, 4);
+            buttonRecenterMap.BringToFront();
+        }
+
+        private void RefreshMiniMap()
+        {
+            if (latestMapData == null)
+            {
+                ClearMiniMap();
+                UpdateRecenterButtonVisibility();
+                return;
+            }
+
+            RenderMiniMap(latestMapData, latestEast, latestSouth);
+            UpdateRecenterButtonVisibility();
+        }
+
+        private void UpdateRecenterButtonVisibility()
+        {
+            if (buttonRecenterMap == null)
+            {
+                return;
+            }
+
+            var movedFromCenter = Math.Abs(miniMapPanX) > 0.5f || Math.Abs(miniMapPanY) > 0.5f;
+            buttonRecenterMap.Visible =
+                latestEast.HasValue &&
+                latestSouth.HasValue &&
+                miniMapZoom > MiniMapZoomMin + 0.001f &&
+                movedFromCenter;
         }
 
         private void SetCgDirDisplayText()
@@ -151,7 +235,7 @@ namespace CgStairFinder
 
         private void LinkLabel2_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            FolderBrowserDialog folderSelectionDialog = new FolderBrowserDialog
+            var folderSelectionDialog = new FolderBrowserDialog
             {
                 Description = "ゲームフォルダを選択"
             };
@@ -174,7 +258,7 @@ namespace CgStairFinder
         }
 
         /// <summary>
-        /// 按下開始偵測按鈕觸發
+        /// 検出開始ボタン押下時の処理
         /// </summary>
         private void Button1_Click(object sender, EventArgs e)
         {
@@ -209,54 +293,105 @@ namespace CgStairFinder
             timer1.Stop();
             label2.ResetText();
             listBox1.Items.Clear();
+            latestMapData = null;
+            latestEast = null;
+            latestSouth = null;
+            latestMapPath = null;
+            miniMapZoom = MiniMapZoomMin;
+            miniMapPanX = 0f;
+            miniMapPanY = 0f;
+            ClearMiniMap();
+            UpdateRecenterButtonVisibility();
             button1.Text = "検出を開始";
             button2.Enabled = true;
             comboBox1.Enabled = true;
         }
 
+        private void ClearMiniMap()
+        {
+            var oldImage = pictureBoxMap.Image;
+            pictureBoxMap.Image = null;
+            oldImage?.Dispose();
+        }
+
+        private void RenderMiniMap(CgMapStairFinder.CgMapData mapData, int? east, int? south)
+        {
+            if (mapData == null || mapData.Width <= 0 || mapData.Height <= 0 ||
+                pictureBoxMap.ClientSize.Width <= 0 || pictureBoxMap.ClientSize.Height <= 0)
+            {
+                ClearMiniMap();
+                return;
+            }
+
+            var bitmap = MiniMapRenderer.Render(
+                pictureBoxMap.ClientSize,
+                mapData,
+                east,
+                south,
+                checkBoxShowTerrain.Checked,
+                miniMapZoom,
+                miniMapPanX,
+                miniMapPanY);
+
+            var oldImage = pictureBoxMap.Image;
+            pictureBoxMap.Image = bitmap;
+            oldImage?.Dispose();
+        }
+
+        private static string GetDirection(int east, int south, CgStair stair)
+        {
+            var r = Math.Atan2(stair.East - east, stair.South - south) / Math.PI * 180;
+
+            if (r <= -135 + 22.5 && r >= -135 - 22.5) { return "←"; }
+            if (r <= -90 + 22.5 && r >= -90 - 22.5) { return "↙"; }
+            if (r <= -45 + 22.5 && r >= -45 - 22.5) { return "↓"; }
+            if (r <= 0 + 22.5 && r >= 0 - 22.5) { return "↘"; }
+            if (r <= 45 + 22.5 && r >= 45 - 22.5) { return "→"; }
+            if (r <= 90 + 22.5 && r >= 90 - 22.5) { return "↗"; }
+            if (r <= 135 + 22.5 && r >= 135 - 22.5) { return "↑"; }
+            if (r < -135 - 22.5 || (r <= 180 + 22.5 && r >= 180 - 22.5)) { return "↖"; }
+
+            return string.Empty;
+        }
+
         /// <summary>
-        /// 啟動偵測後, 計時器每次的觸發行為
+        /// 検出開始後のタイマー処理
         /// </summary>
         private void Timer1_Tick(object sender, EventArgs e)
         {
             timer1.Interval = 500;
 
-            int? hProcess = null;
-            var mapName = string.Empty; // e.g. 法蘭城
+            var mapName = string.Empty;
             var mapFile = default(FileInfo);
-            var isSelectdWindow = comboBox1.SelectedIndex > 0; // 0 is 不選擇
+            var isSelectedWindow = comboBox1.SelectedIndex > 0;
+            int? east = null;
+            int? south = null;
 
             try
             {
-                // 有選擇視窗
-                if (isSelectdWindow)
+                if (isSelectedWindow)
                 {
-                    var p = (Process)comboBox1.SelectedItem;
-                    if (p.HasExited)
+                    var process = comboBox1.SelectedItem as Process;
+                    if (process == null)
                     {
                         throw new Exception("ウィンドウの検出に失敗しました。");
                     }
 
-                    hProcess = OpenProcess(0x1F0FFF, false, p.Id);
-
-                    // 取地圖名
-                    var readMapNameBuffer = new byte[32];
-                    ReadProcessMemory(hProcess.Value, 0x95C870, readMapNameBuffer, readMapNameBuffer.Length, 0);
-                    mapName = DecodeMapName(readMapNameBuffer);
-
-                    // 取當前地圖檔名
-                    var readMapFileBuffer = new byte[32];
-                    ReadProcessMemory(hProcess.Value, 0x18CCC8, readMapFileBuffer, readMapFileBuffer.Length, 0);
-                    mapFile = ResolveMapFile(Settings.Default.cgDir, readMapFileBuffer);
-                    if (mapFile == null || !mapFile.Exists)
+                    CgClientMapSnapshot snapshot;
+                    string errorMessage;
+                    if (!CgClientReader.TryReadSnapshot(process, Settings.Default.cgDir, out snapshot, out errorMessage))
                     {
-                        // Fallback for clients where current map path address is unavailable.
-                        mapFile = GetLatestMapFile(Settings.Default.cgDir);
+                        throw new Exception(errorMessage);
                     }
+
+                    mapName = snapshot.MapName;
+                    mapFile = snapshot.MapFile;
+                    east = snapshot.East;
+                    south = snapshot.South;
                 }
                 else
                 {
-                    mapFile = GetLatestMapFile(Settings.Default.cgDir);
+                    mapFile = CgClientReader.GetLatestMapFile(Settings.Default.cgDir);
                 }
 
                 if (mapFile == null || !mapFile.Exists)
@@ -265,111 +400,85 @@ namespace CgStairFinder
                 }
 
                 Text = string.IsNullOrWhiteSpace(mapName) ? mapFile.Name : mapName;
-
-                label2.Text = mapFile.FullName;
-                if (label2.Text.Length > 18)
-                {
-                    var c = mapFile.FullName.ToCharArray();
-                    Array.Reverse(c);
-                    Array.Resize(ref c, 16);
-                    Array.Reverse(c);
-                    label2.Text = $"...{new string(c)}";
-                }
+                SetMapPathLabel(mapFile.FullName);
 
                 listBox1.Items.Clear();
-                var cgStairs = new CgMapStairFinder(mapFile).GetStairs();
+                var mapData = new CgMapStairFinder(mapFile).GetMapData();
+                latestMapData = mapData;
+                latestEast = east;
+                latestSouth = south;
 
+                var currentMapPath = mapFile.FullName;
+                if (!string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    latestMapPath = currentMapPath;
+                    miniMapPanX = 0f;
+                    miniMapPanY = 0f;
+                }
+
+                RefreshMiniMap();
+
+                var cgStairs = mapData.Stairs;
                 if (cgStairs.Count == 0)
                 {
                     listBox1.Items.Add("階段が見つかりませんでした。");
                     return;
                 }
 
-                logs[mapFile.Name] = new DetectLog { MapCode = mapFile.Name, MapName = mapName, CgStairs = cgStairs, DetectTime = DateTime.Now };
-
-                foreach (var c in cgStairs)
+                logs[mapFile.Name] = new DetectLog
                 {
-                    var type = CgStair.Translate(c.Type);
-                    if (!isSelectdWindow)
+                    MapCode = mapFile.Name,
+                    MapName = mapName,
+                    CgStairs = cgStairs,
+                    DetectTime = DateTime.Now
+                };
+
+                foreach (var stair in cgStairs)
+                {
+                    var type = CgStair.Translate(stair.Type);
+                    if (!isSelectedWindow)
                     {
-                        listBox1.Items.Add($"東{c.East}、南{c.South} -- {type}");
+                        listBox1.Items.Add($"東{stair.East}、南{stair.South} -- {type}");
                         continue;
                     }
-
-                    // 取當前座標
-                    var east = default(int?);
-                    var south = default(int?);
-                    var buffer = new byte[4];
-                    try
-                    {
-                        ReadProcessMemory(hProcess.Value, 0x95C88C, buffer, 4, 0);
-                        east = (int)(BitConverter.ToSingle(buffer, 0) / 64);
-                        ReadProcessMemory(hProcess.Value, 0x95C890, buffer, 4, 0);
-                        south = (int)BitConverter.ToSingle(buffer, 0) / 64;
-                    }
-                    catch { /* 吃掉 */ }
 
                     var direction = string.Empty;
                     if (east.HasValue && south.HasValue)
                     {
-                        #region 計算樓梯方向
-                        var r = Math.Atan2(c.East - east.Value, c.South - south.Value) / Math.PI * 180;
-
-                        if (r <= -135 + 22.5 && r >= -135 - 22.5)
-                        {
-                            direction = "←";
-                        }
-                        if (r <= -90 + 22.5 && r >= -90 - 22.5)
-                        {
-                            direction = "↙";
-                        }
-                        if (r <= -45 + 22.5 && r >= -45 - 22.5)
-                        {
-                            direction = "↓";
-                        }
-                        if (r <= 0 + 22.5 && r >= 0 - 22.5)
-                        {
-                            direction = "↘";
-                        }
-                        if (r <= 45 + 22.5 && r >= 45 - 22.5)
-                        {
-                            direction = "→";
-                        }
-                        if (r <= 90 + 22.5 && r >= 90 - 22.5)
-                        {
-                            direction = "↗";
-                        }
-                        if (r <= 135 + 22.5 && r >= 135 - 22.5)
-                        {
-                            direction = "↑";
-                        }
-                        if (r < -135 - 22.5 || (r <= 180 + 22.5 && r >= 180 - 22.5))
-                        {
-                            direction = "↖";
-                        }
-                        #endregion
+                        direction = GetDirection(east.Value, south.Value, stair);
                     }
 
-                    listBox1.Items.Add($"東{c.East}、南{c.South} {direction} -- {type}");
+                    listBox1.Items.Add($"東{stair.East}、南{stair.South} {direction} -- {type}");
                 }
             }
-            catch (IOException) { return; }
+            catch (IOException)
+            {
+                return;
+            }
             catch (Exception ex)
             {
                 Stop();
                 MessageBox.Show(this, $"エラーが発生したため自動検出を停止しました。\n\n{ex.Message}", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            finally
+        }
+
+        private void SetMapPathLabel(string fullPath)
+        {
+            label2.Text = fullPath;
+            if (label2.Text.Length <= 18)
             {
-                if (hProcess.HasValue)
-                {
-                    CloseHandle(hProcess.Value);
-                }
+                return;
             }
+
+            var c = fullPath.ToCharArray();
+            Array.Reverse(c);
+            Array.Resize(ref c, 16);
+            Array.Reverse(c);
+            label2.Text = $"...{new string(c)}";
         }
 
         /// <summary>
-        /// list box 顏色
+        /// リスト表示の行カラー描画
         /// </summary>
         private void ListBox_DrawItem(object sender, DrawItemEventArgs e)
         {
@@ -418,8 +527,8 @@ namespace CgStairFinder
 
         private void Button3_Click(object sender, EventArgs e)
         {
-            var process = (Process)comboBox1.SelectedItem;
-            if (process is null)
+            var process = comboBox1.SelectedItem as Process;
+            if (process == null)
             {
                 return;
             }
@@ -457,6 +566,11 @@ namespace CgStairFinder
 
             File.WriteAllText(tmpPath, sb.ToString(), new UTF8Encoding(true));
             Process.Start("notepad.exe", tmpPath);
+        }
+
+        private void CheckBoxShowTerrain_CheckedChanged(object sender, EventArgs e)
+        {
+            RefreshMiniMap();
         }
     }
 }

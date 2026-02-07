@@ -74,6 +74,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="CgClientReader.cs" />
     <Compile Include="Defined.cs" />
     <Compile Include="DetectLog.cs" />
     <Compile Include="Main.cs">
@@ -89,6 +90,7 @@
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
       <DependentUpon>Settings.settings</DependentUpon>
     </Compile>
+    <Compile Include="MiniMapRenderer.cs" />
     <Compile Include="StairFinder.cs" />
     <EmbeddedResource Include="Main.resx">
       <DependentUpon>Main.cs</DependentUpon>
