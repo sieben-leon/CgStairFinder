@@ -20,6 +20,8 @@ namespace CgStairFinder
 
         private static readonly IDictionary<string, DetectLog> logs = new Dictionary<string, DetectLog>();
         private static readonly IDictionary<string, DetectLog> sharedLogs = new Dictionary<string, DetectLog>();
+        private static readonly IDictionary<string, IList<MapPin>> localPins = new Dictionary<string, IList<MapPin>>(StringComparer.OrdinalIgnoreCase);
+        private static readonly IDictionary<string, IList<MapPin>> sharedPins = new Dictionary<string, IList<MapPin>>(StringComparer.OrdinalIgnoreCase);
 
         private const float MiniMapZoomMin = 1f;
         private const float MiniMapZoomMax = 8f;
@@ -43,6 +45,28 @@ namespace CgStairFinder
         private Button buttonRecenterMap;
         private Label labelMiniMapHint;
 
+        private enum StairListItemType
+        {
+            Stair,
+            Pin,
+            Message
+        }
+
+        private sealed class StairListItem
+        {
+            public StairListItemType ItemType { get; set; }
+            public StairType? StairType { get; set; }
+            public MapPin Pin { get; set; }
+            public string MapCode { get; set; }
+            public bool IsShared { get; set; }
+            public string Text { get; set; }
+
+            public override string ToString()
+            {
+                return Text ?? string.Empty;
+            }
+        }
+
         private sealed class ShareLogItem
         {
             public DetectLog Log { get; set; }
@@ -63,6 +87,7 @@ namespace CgStairFinder
 
         private void Main_Load(object sender, EventArgs e)
         {
+            LoadLocalPins();
             InitializeMiniMapInteractions();
             EnsureMiniMapHintLabel();
             SetCgDirDisplayText();
@@ -117,7 +142,7 @@ namespace CgStairFinder
                 TextAlign = ContentAlignment.MiddleLeft,
                 Margin = new Padding(3, 4, 3, 2)
             };
-            tableLayoutPanel2.Controls.Add(labelMiniMapHint, 0, 5);
+            tableLayoutPanel2.Controls.Add(labelMiniMapHint, 0, 6);
             tableLayoutPanel2.SetColumnSpan(labelMiniMapHint, 2);
         }
 
@@ -271,6 +296,20 @@ namespace CgStairFinder
                 movedFromCenter;
         }
 
+        private void LoadLocalPins()
+        {
+            localPins.Clear();
+            foreach (var entry in LocalPinStore.Load())
+            {
+                localPins[entry.Key] = entry.Value;
+            }
+        }
+
+        private void SaveLocalPins()
+        {
+            LocalPinStore.Save(localPins);
+        }
+
         private void SetCgDirDisplayText()
         {
             var cgDir = Settings.Default.cgDir;
@@ -420,7 +459,14 @@ namespace CgStairFinder
 
             foreach (var stair in localStairs ?? Enumerable.Empty<CgStair>())
             {
-                listBox1.Items.Add(BuildStairListText(stair, isSelectedWindow, east, south, false));
+                listBox1.Items.Add(new StairListItem
+                {
+                    ItemType = StairListItemType.Stair,
+                    StairType = stair.Type,
+                    MapCode = mapCode,
+                    IsShared = false,
+                    Text = BuildStairListText(stair, isSelectedWindow, east, south, false)
+                });
             }
 
             DetectLog sharedLog;
@@ -428,13 +474,48 @@ namespace CgStairFinder
             {
                 foreach (var stair in sharedLog.CgStairs ?? Enumerable.Empty<CgStair>())
                 {
-                    listBox1.Items.Add(BuildStairListText(stair, isSelectedWindow, east, south, true));
+                    listBox1.Items.Add(new StairListItem
+                    {
+                        ItemType = StairListItemType.Stair,
+                        StairType = stair.Type,
+                        MapCode = mapCode,
+                        IsShared = true,
+                        Text = BuildStairListText(stair, isSelectedWindow, east, south, true)
+                    });
                 }
+            }
+
+            foreach (var pin in GetMapPins(localPins, mapCode).OrderBy(x => x.East).ThenBy(x => x.South).ThenBy(x => x.Title))
+            {
+                listBox1.Items.Add(new StairListItem
+                {
+                    ItemType = StairListItemType.Pin,
+                    Pin = pin,
+                    MapCode = mapCode,
+                    IsShared = false,
+                    Text = BuildPinListText(pin, false)
+                });
+            }
+
+            foreach (var pin in GetMapPins(sharedPins, mapCode).OrderBy(x => x.East).ThenBy(x => x.South).ThenBy(x => x.Title))
+            {
+                listBox1.Items.Add(new StairListItem
+                {
+                    ItemType = StairListItemType.Pin,
+                    Pin = pin,
+                    MapCode = mapCode,
+                    IsShared = true,
+                    Text = BuildPinListText(pin, true)
+                });
             }
 
             if (listBox1.Items.Count == 0)
             {
-                listBox1.Items.Add("\u968E\u6BB5\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
+                listBox1.Items.Add(new StairListItem
+                {
+                    ItemType = StairListItemType.Message,
+                    Text = "\u968E\u6BB5\u30FB\u30D4\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002"
+                });
             }
         }
 
@@ -454,6 +535,62 @@ namespace CgStairFinder
             }
 
             return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}", prefix, stair.East, stair.South, direction, type);
+        }
+
+        private static string BuildPinListText(MapPin pin, bool isShared)
+        {
+            var prefix = isShared ? "\uFF0A" : string.Empty;
+            return string.Format("{0}\u6771{1}\u3001\u5357{2} -- {3}", prefix, pin.East, pin.South, pin.Title);
+        }
+
+        private static IEnumerable<MapPin> GetMapPins(IDictionary<string, IList<MapPin>> pinSource, string mapCode)
+        {
+            if (pinSource == null || string.IsNullOrWhiteSpace(mapCode))
+            {
+                return Enumerable.Empty<MapPin>();
+            }
+
+            var normalizedMapCode = NormalizeMapCode(mapCode);
+            if (string.IsNullOrWhiteSpace(normalizedMapCode))
+            {
+                return Enumerable.Empty<MapPin>();
+            }
+
+            IList<MapPin> pins;
+            if (pinSource.TryGetValue(normalizedMapCode, out pins) && pins != null)
+            {
+                return pins.Where(x => x != null);
+            }
+
+            var merged = pinSource
+                .Where(x => string.Equals(NormalizeMapCode(x.Key), normalizedMapCode, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(x => x.Value ?? Enumerable.Empty<MapPin>())
+                .Where(x => x != null)
+                .ToList();
+            if (!merged.Any())
+            {
+                return Enumerable.Empty<MapPin>();
+            }
+
+            return merged;
+        }
+
+        private static string NormalizeMapCode(string mapCode)
+        {
+            if (string.IsNullOrWhiteSpace(mapCode))
+            {
+                return null;
+            }
+
+            var normalized = mapCode.Trim().Replace('/', '\\');
+            try
+            {
+                return Path.GetFileName(normalized);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return normalized;
+            }
         }
 
         private void RefreshStairListFromLatest()
@@ -674,20 +811,9 @@ namespace CgStairFinder
                 return;
             }
 
-            var text = ((ListBox)sender).Items[e.Index].ToString();
-            var fillColor = Color.White;
-            if (text.Contains(Defined.STAIR_TYPE_UP_DISPLAY_TEXT))
-            {
-                fillColor = Color.FromArgb(220, 252, 231);
-            }
-            else if (text.Contains(Defined.STAIR_TYPE_DOWN_DISPLAY_TEXT))
-            {
-                fillColor = Color.FromArgb(254, 226, 226);
-            }
-            else if (text.Contains(Defined.STAIR_TYPE_MOVEABLE_DISPLAY_TEXT))
-            {
-                fillColor = Color.FromArgb(226, 232, 240);
-            }
+            var item = ((ListBox)sender).Items[e.Index] as StairListItem;
+            var text = item?.ToString() ?? ((ListBox)sender).Items[e.Index].ToString();
+            var fillColor = GetListItemFillColor(item);
 
             var rowRect = new Rectangle(e.Bounds.X + 3, e.Bounds.Y + 2, e.Bounds.Width - 6, e.Bounds.Height - 4);
             using (var fillBrush = new SolidBrush(fillColor))
@@ -711,6 +837,229 @@ namespace CgStairFinder
                 textRect,
                 Color.FromArgb(15, 23, 42),
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+
+        private static Color GetListItemFillColor(StairListItem item)
+        {
+            if (item == null)
+            {
+                return Color.White;
+            }
+
+            if (item.ItemType == StairListItemType.Pin)
+            {
+                return Color.FromArgb(243, 232, 255);
+            }
+
+            if (item.ItemType != StairListItemType.Stair || !item.StairType.HasValue)
+            {
+                return Color.White;
+            }
+
+            switch (item.StairType.Value)
+            {
+                case StairType.Up:
+                    return Color.FromArgb(220, 252, 231);
+                case StairType.Down:
+                    return Color.FromArgb(254, 226, 226);
+                case StairType.Jump:
+                    return Color.FromArgb(226, 232, 240);
+                default:
+                    return Color.White;
+            }
+        }
+
+        private void ListBox_MouseClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var index = listBox1.IndexFromPoint(e.Location);
+            if (index < 0 || index >= listBox1.Items.Count)
+            {
+                return;
+            }
+
+            var item = listBox1.Items[index] as StairListItem;
+            if (item?.ItemType != StairListItemType.Pin || item.Pin == null)
+            {
+                return;
+            }
+
+            ShowPinDetailDialog(item.MapCode, item.Pin, item.IsShared);
+        }
+
+        private void ShowPinDetailDialog(string mapCode, MapPin pin, bool isShared)
+        {
+            if (pin == null)
+            {
+                return;
+            }
+
+            using (var form = new Form())
+            using (var table = new TableLayoutPanel())
+            using (var labelCoord = new Label())
+            using (var labelTitle = new Label())
+            using (var textDetail = new TextBox())
+            using (var buttonPanel = new FlowLayoutPanel())
+            using (var buttonDelete = new Button())
+            using (var buttonClose = new Button())
+            {
+                form.Text = isShared ? "共有ピン" : "ローカルピン";
+                form.StartPosition = FormStartPosition.CenterParent;
+                form.FormBorderStyle = FormBorderStyle.FixedDialog;
+                form.MinimizeBox = false;
+                form.MaximizeBox = false;
+                form.ClientSize = new Size(420, 250);
+                form.Font = Font;
+
+                table.Dock = DockStyle.Fill;
+                table.Padding = new Padding(10);
+                table.ColumnCount = 1;
+                table.RowCount = 4;
+                table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+                table.RowStyles.Add(new RowStyle());
+
+                labelCoord.AutoSize = true;
+                labelCoord.Text = string.Format("座標: 東{0}、南{1}", pin.East, pin.South);
+                table.Controls.Add(labelCoord, 0, 0);
+
+                labelTitle.AutoSize = true;
+                labelTitle.Margin = new Padding(3, 6, 3, 3);
+                labelTitle.Text = string.Format("タイトル: {0}", pin.Title);
+                table.Controls.Add(labelTitle, 0, 1);
+
+                textDetail.Multiline = true;
+                textDetail.ReadOnly = true;
+                textDetail.ScrollBars = ScrollBars.Vertical;
+                textDetail.Dock = DockStyle.Fill;
+                textDetail.Text = string.IsNullOrWhiteSpace(pin.Detail) ? "（詳細なし）" : pin.Detail;
+                table.Controls.Add(textDetail, 0, 2);
+
+                buttonPanel.Dock = DockStyle.Fill;
+                buttonPanel.FlowDirection = FlowDirection.RightToLeft;
+                buttonPanel.WrapContents = false;
+
+                buttonClose.Text = "閉じる";
+                buttonClose.Width = 88;
+                buttonClose.DialogResult = DialogResult.Cancel;
+
+                buttonDelete.Text = "削除";
+                buttonDelete.Width = 88;
+                buttonDelete.Click += (s, e) =>
+                {
+                    form.Tag = "delete";
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                };
+
+                buttonPanel.Controls.Add(buttonClose);
+                buttonPanel.Controls.Add(buttonDelete);
+                table.Controls.Add(buttonPanel, 0, 3);
+
+                form.Controls.Add(table);
+                form.CancelButton = buttonClose;
+
+                if (form.ShowDialog(this) != DialogResult.OK || !string.Equals(form.Tag as string, "delete", StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            if (!TryDeletePin(mapCode, pin, isShared))
+            {
+                MessageBox.Show(
+                    this,
+                    "ピンを削除できませんでした。",
+                    "メッセージ",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!isShared)
+            {
+                SaveLocalPins();
+            }
+
+            RefreshStairListFromLatest();
+        }
+
+        private bool TryDeletePin(string mapCode, MapPin pin, bool isShared)
+        {
+            mapCode = NormalizeMapCode(mapCode);
+            var source = isShared ? sharedPins : localPins;
+            return RemovePin(source, mapCode, pin);
+        }
+
+        private static bool RemovePin(IDictionary<string, IList<MapPin>> source, string mapCode, MapPin pin)
+        {
+            if (source == null || string.IsNullOrWhiteSpace(mapCode) || pin == null)
+            {
+                return false;
+            }
+
+            IList<MapPin> pins;
+            if (!source.TryGetValue(mapCode, out pins) || pins == null || pins.Count == 0)
+            {
+                return false;
+            }
+
+            var index = -1;
+            for (var i = 0; i < pins.Count; i++)
+            {
+                var candidate = pins[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                if (candidate.East == pin.East &&
+                    candidate.South == pin.South &&
+                    string.Equals(candidate.Title, pin.Title, StringComparison.Ordinal) &&
+                    string.Equals(candidate.Detail ?? string.Empty, pin.Detail ?? string.Empty, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+
+            if (index < 0)
+            {
+                for (var i = 0; i < pins.Count; i++)
+                {
+                    var candidate = pins[i];
+                    if (candidate == null)
+                    {
+                        continue;
+                    }
+
+                    if (candidate.East == pin.East &&
+                        candidate.South == pin.South &&
+                        string.Equals(candidate.Title, pin.Title, StringComparison.Ordinal))
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+
+            if (index < 0)
+            {
+                return false;
+            }
+
+            pins.RemoveAt(index);
+            if (pins.Count == 0)
+            {
+                source.Remove(mapCode);
+            }
+
+            return true;
         }
 
         private void Button2_Click(object sender, EventArgs e)
@@ -763,6 +1112,258 @@ namespace CgStairFinder
             Process.Start("notepad.exe", tmpPath);
         }
 
+        private void Button8_Click(object sender, EventArgs e)
+        {
+            string mapCode;
+            int initialEast;
+            int initialSouth;
+            if (!TryGetCurrentMapContext(out mapCode, out initialEast, out initialSouth))
+            {
+                mapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
+                initialEast = latestEast ?? 0;
+                initialSouth = latestSouth ?? 0;
+            }
+
+            mapCode = NormalizeMapCode(mapCode);
+
+            if (string.IsNullOrWhiteSpace(mapCode))
+            {
+                MessageBox.Show(
+                    this,
+                    "現在のマップを取得できません。検出開始後に再度お試しください。",
+                    "メッセージ",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            MapPin newPin;
+            if (!TryShowCreatePinDialog(mapCode, initialEast, initialSouth, out newPin))
+            {
+                return;
+            }
+
+            AddOrUpdateLocalPin(mapCode, newPin);
+            SaveLocalPins();
+            RefreshStairListFromLatest();
+        }
+
+        private bool TryGetCurrentMapContext(out string mapCode, out int east, out int south)
+        {
+            mapCode = null;
+            east = 0;
+            south = 0;
+
+            if (comboBox1.SelectedIndex > 0)
+            {
+                var process = comboBox1.SelectedItem as Process;
+                if (process != null)
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            CgClientMapSnapshot snapshot;
+                            string errorMessage;
+                            if (CgClientReader.TryReadSnapshot(process, Settings.Default.cgDir, out snapshot, out errorMessage))
+                            {
+                                east = snapshot.East;
+                                south = snapshot.South;
+                                mapCode = snapshot.MapFile?.Name;
+                                if (!string.IsNullOrWhiteSpace(mapCode))
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(latestMapPath))
+            {
+                mapCode = Path.GetFileName(latestMapPath);
+            }
+
+            if (latestEast.HasValue)
+            {
+                east = latestEast.Value;
+            }
+
+            if (latestSouth.HasValue)
+            {
+                south = latestSouth.Value;
+            }
+
+            return !string.IsNullOrWhiteSpace(mapCode) && latestEast.HasValue && latestSouth.HasValue;
+        }
+
+        private bool TryShowCreatePinDialog(string mapCode, int initialEast, int initialSouth, out MapPin pin)
+        {
+            pin = null;
+
+            using (var form = new Form())
+            using (var table = new TableLayoutPanel())
+            using (var labelMap = new Label())
+            using (var labelEast = new Label())
+            using (var labelSouth = new Label())
+            using (var labelTitle = new Label())
+            using (var labelDetail = new Label())
+            using (var inputEast = new NumericUpDown())
+            using (var inputSouth = new NumericUpDown())
+            using (var inputTitle = new TextBox())
+            using (var inputDetail = new TextBox())
+            using (var buttons = new FlowLayoutPanel())
+            using (var buttonOk = new Button())
+            using (var buttonCancel = new Button())
+            {
+                form.Text = "ピンを追加";
+                form.StartPosition = FormStartPosition.CenterParent;
+                form.FormBorderStyle = FormBorderStyle.FixedDialog;
+                form.MinimizeBox = false;
+                form.MaximizeBox = false;
+                form.ClientSize = new Size(420, 280);
+                form.Font = Font;
+
+                table.Dock = DockStyle.Fill;
+                table.Padding = new Padding(10);
+                table.ColumnCount = 2;
+                table.RowCount = 6;
+                table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
+                table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+                table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+                table.RowStyles.Add(new RowStyle());
+
+                labelMap.Text = string.Format("マップ: {0}", mapCode);
+                labelMap.AutoSize = true;
+                labelMap.Dock = DockStyle.Fill;
+                table.Controls.Add(labelMap, 0, 0);
+                table.SetColumnSpan(labelMap, 2);
+
+                labelEast.Text = "東";
+                labelEast.TextAlign = ContentAlignment.MiddleLeft;
+                labelEast.Dock = DockStyle.Fill;
+                inputEast.Minimum = 0;
+                inputEast.Maximum = 9999;
+                inputEast.Value = Math.Min(9999, Math.Max(0, initialEast));
+                inputEast.Width = 120;
+                table.Controls.Add(labelEast, 0, 1);
+                table.Controls.Add(inputEast, 1, 1);
+
+                labelSouth.Text = "南";
+                labelSouth.TextAlign = ContentAlignment.MiddleLeft;
+                labelSouth.Dock = DockStyle.Fill;
+                inputSouth.Minimum = 0;
+                inputSouth.Maximum = 9999;
+                inputSouth.Value = Math.Min(9999, Math.Max(0, initialSouth));
+                inputSouth.Width = 120;
+                table.Controls.Add(labelSouth, 0, 2);
+                table.Controls.Add(inputSouth, 1, 2);
+
+                labelTitle.AutoSize = true;
+                labelTitle.Text = "タイトル\r\n(5文字)";
+                labelTitle.TextAlign = ContentAlignment.MiddleLeft;
+                labelTitle.Dock = DockStyle.Fill;
+                inputTitle.MaxLength = 5;
+                inputTitle.Dock = DockStyle.Fill;
+                table.Controls.Add(labelTitle, 0, 3);
+                table.Controls.Add(inputTitle, 1, 3);
+
+                labelDetail.Text = "詳細";
+                labelDetail.TextAlign = ContentAlignment.MiddleLeft;
+                labelDetail.Dock = DockStyle.Fill;
+                inputDetail.Multiline = true;
+                inputDetail.ScrollBars = ScrollBars.Vertical;
+                inputDetail.Dock = DockStyle.Fill;
+                table.Controls.Add(labelDetail, 0, 4);
+                table.Controls.Add(inputDetail, 1, 4);
+
+                buttons.Dock = DockStyle.Fill;
+                buttons.FlowDirection = FlowDirection.RightToLeft;
+                buttons.WrapContents = false;
+
+                buttonOk.Text = "保存";
+                buttonOk.Width = 88;
+                buttonOk.DialogResult = DialogResult.OK;
+
+                buttonCancel.Text = "キャンセル";
+                buttonCancel.Width = 88;
+                buttonCancel.DialogResult = DialogResult.Cancel;
+
+                buttons.Controls.Add(buttonOk);
+                buttons.Controls.Add(buttonCancel);
+                table.Controls.Add(buttons, 0, 5);
+                table.SetColumnSpan(buttons, 2);
+
+                form.Controls.Add(table);
+                form.AcceptButton = buttonOk;
+                form.CancelButton = buttonCancel;
+
+                if (form.ShowDialog(this) != DialogResult.OK)
+                {
+                    return false;
+                }
+
+                var normalized = MapPin.Normalize(new MapPin
+                {
+                    East = (int)inputEast.Value,
+                    South = (int)inputSouth.Value,
+                    Title = inputTitle.Text,
+                    Detail = inputDetail.Text
+                });
+
+                if (normalized == null)
+                {
+                    MessageBox.Show(
+                        this,
+                        "タイトルを1〜5文字で入力してください。",
+                        "メッセージ",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return false;
+                }
+
+                pin = normalized;
+                return true;
+            }
+        }
+
+        private void AddOrUpdateLocalPin(string mapCode, MapPin pin)
+        {
+            mapCode = NormalizeMapCode(mapCode);
+            if (string.IsNullOrWhiteSpace(mapCode) || pin == null)
+            {
+                return;
+            }
+
+            IList<MapPin> mapPins;
+            if (!localPins.TryGetValue(mapCode, out mapPins) || mapPins == null)
+            {
+                mapPins = new List<MapPin>();
+                localPins[mapCode] = mapPins;
+            }
+
+            var existing = mapPins.FirstOrDefault(x =>
+                x != null &&
+                x.East == pin.East &&
+                x.South == pin.South &&
+                string.Equals(x.Title, pin.Title, StringComparison.Ordinal));
+            if (existing == null)
+            {
+                mapPins.Add(pin);
+                return;
+            }
+
+            existing.Detail = pin.Detail;
+        }
+
         private void Button5_Click(object sender, EventArgs e)
         {
             var candidates = BuildShareCandidates();
@@ -774,7 +1375,8 @@ namespace CgStairFinder
 
             List<DetectLog> selectedLogs;
             bool includeMapFiles;
-            if (!TrySelectShareLogs(candidates, out selectedLogs, out includeMapFiles))
+            bool includePins;
+            if (!TrySelectShareLogs(candidates, out selectedLogs, out includeMapFiles, out includePins))
             {
                 return;
             }
@@ -808,7 +1410,9 @@ namespace CgStairFinder
                         dialog.FileName,
                         selectedLogs,
                         includeMapFiles,
-                        TryLoadMapDatFile);
+                        TryLoadMapDatFile,
+                        includePins,
+                        TryLoadPinsForShare);
 
                     var detail = string.Format(
                         "共有データを出力しました。\n\n対象: {0} マップ\n{1}",
@@ -820,6 +1424,11 @@ namespace CgStairFinder
                             "\n\n.dat 同梱: {0} 件\n.dat 未検出: {1} 件",
                             exportResult.ExportedMapFiles,
                             exportResult.MissingMapFiles);
+                    }
+
+                    if (includePins)
+                    {
+                        detail += "\n\nピン情報を同梱しました。";
                     }
 
                     MessageBox.Show(
@@ -875,6 +1484,7 @@ namespace CgStairFinder
                         result = HistoryShareService.ImportCompressed(
                             dialog.FileName,
                             sharedLogs,
+                            sharedPins,
                             GetMapDirectoryPath(),
                             overwriteExistingMapFiles);
                     }
@@ -906,6 +1516,14 @@ namespace CgStairFinder
                             result.SkippedMapFiles,
                             result.InvalidMapFiles,
                             result.FailedMapFiles);
+                    }
+
+                    if (result.PinMaps > 0)
+                    {
+                        detail += string.Format(
+                            "\n\n共有ピン: {0} マップ / {1} 件",
+                            result.PinMaps,
+                            result.ImportedPins);
                     }
 
                     if (touchedCurrentMap)
@@ -1199,15 +1817,40 @@ namespace CgStairFinder
             }
         }
 
-        private bool TrySelectShareLogs(IList<ShareLogItem> candidates, out List<DetectLog> selectedLogs, out bool includeMapFiles)
+        private IEnumerable<MapPin> TryLoadPinsForShare(string mapCode)
+        {
+            if (string.IsNullOrWhiteSpace(mapCode))
+            {
+                return Enumerable.Empty<MapPin>();
+            }
+
+            var result = new List<MapPin>();
+            result.AddRange(GetMapPins(localPins, mapCode));
+            result.AddRange(GetMapPins(sharedPins, mapCode));
+
+            return result
+                .Select(MapPin.Normalize)
+                .Where(x => x != null)
+                .GroupBy(x => string.Format("{0}:{1}:{2}:{3}", x.East, x.South, x.Title, x.Detail), StringComparer.Ordinal)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        private bool TrySelectShareLogs(
+            IList<ShareLogItem> candidates,
+            out List<DetectLog> selectedLogs,
+            out bool includeMapFiles,
+            out bool includePins)
         {
             selectedLogs = new List<DetectLog>();
             includeMapFiles = false;
+            includePins = false;
 
             using (var form = new Form())
             using (var label = new Label())
             using (var checkedList = new CheckedListBox())
             using (var checkIncludeMapFiles = new CheckBox())
+            using (var checkIncludePins = new CheckBox())
             using (var buttonOk = new Button())
             using (var buttonCancel = new Button())
             {
@@ -1241,6 +1884,12 @@ namespace CgStairFinder
                 checkIncludeMapFiles.Text = "選択したマップの .dat も同梱する（ファイルサイズ増）";
                 checkIncludeMapFiles.Checked = false;
 
+                checkIncludePins.AutoSize = true;
+                checkIncludePins.Dock = DockStyle.Bottom;
+                checkIncludePins.Padding = new Padding(8, 2, 8, 2);
+                checkIncludePins.Text = "ピン情報も共有する";
+                checkIncludePins.Checked = false;
+
                 var buttonPanel = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Bottom,
@@ -1261,6 +1910,7 @@ namespace CgStairFinder
                 buttonPanel.Controls.Add(buttonCancel);
 
                 form.Controls.Add(checkedList);
+                form.Controls.Add(checkIncludePins);
                 form.Controls.Add(checkIncludeMapFiles);
                 form.Controls.Add(buttonPanel);
                 form.Controls.Add(label);
@@ -1277,13 +1927,14 @@ namespace CgStairFinder
                     .Select(x => x.Log)
                     .ToList();
                 includeMapFiles = checkIncludeMapFiles.Checked;
+                includePins = checkIncludePins.Checked;
                 return true;
             }
         }
 
         private void Button7_Click(object sender, EventArgs e)
         {
-            if (!sharedLogs.Any())
+            if (!sharedLogs.Any() && !sharedPins.Any())
             {
                 MessageBox.Show(
                     this,
@@ -1294,8 +1945,11 @@ namespace CgStairFinder
                 return;
             }
 
-            var deleted = sharedLogs.Count;
+            var deleted = sharedLogs.Keys
+                .Union(sharedPins.Keys, StringComparer.OrdinalIgnoreCase)
+                .Count();
             sharedLogs.Clear();
+            sharedPins.Clear();
             RefreshStairListFromLatest();
             MessageBox.Show(
                 this,

@@ -35,8 +35,10 @@
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
             this.listBox1 = new System.Windows.Forms.ListBox();
             this.flowLayoutPanel2 = new System.Windows.Forms.FlowLayoutPanel();
+            this.flowLayoutPanelPin = new System.Windows.Forms.FlowLayoutPanel();
             this.flowLayoutPanelShare = new System.Windows.Forms.FlowLayoutPanel();
             this.button1 = new System.Windows.Forms.Button();
+            this.button8 = new System.Windows.Forms.Button();
             this.button5 = new System.Windows.Forms.Button();
             this.button6 = new System.Windows.Forms.Button();
             this.button7 = new System.Windows.Forms.Button();
@@ -52,6 +54,7 @@
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxMap)).BeginInit();
             this.tableLayoutPanel2.SuspendLayout();
             this.flowLayoutPanel2.SuspendLayout();
+            this.flowLayoutPanelPin.SuspendLayout();
             this.flowLayoutPanelShare.SuspendLayout();
             this.flowLayoutPanel1.SuspendLayout();
             this.SuspendLayout();
@@ -69,18 +72,19 @@
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 40F));
             this.tableLayoutPanel2.Controls.Add(this.listBox1, 0, 3);
             this.tableLayoutPanel2.Controls.Add(this.pictureBoxMap, 1, 3);
-            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel2, 1, 4);
-            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanelShare, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanelPin, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel2, 1, 5);
+            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanelShare, 0, 5);
             this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel1, 0, 2);
             this.tableLayoutPanel2.Controls.Add(this.linkLabel2, 0, 0);
-            this.tableLayoutPanel2.Controls.Add(this.label2, 0, 6);
+            this.tableLayoutPanel2.Controls.Add(this.label2, 0, 7);
             this.tableLayoutPanel2.Controls.Add(this.comboBox1, 0, 1);
             this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
             this.tableLayoutPanel2.Margin = new System.Windows.Forms.Padding(0);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
             this.tableLayoutPanel2.Padding = new System.Windows.Forms.Padding(12);
-            this.tableLayoutPanel2.RowCount = 8;
+            this.tableLayoutPanel2.RowCount = 9;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -107,6 +111,7 @@
             this.listBox1.Size = new System.Drawing.Size(209, 183);
             this.listBox1.TabIndex = 15;
             this.listBox1.DrawItem += new System.Windows.Forms.DrawItemEventHandler(this.ListBox_DrawItem);
+            this.listBox1.MouseClick += new System.Windows.Forms.MouseEventHandler(this.ListBox_MouseClick);
             // 
             // pictureBoxMap
             // 
@@ -127,11 +132,24 @@
             this.flowLayoutPanel2.Controls.Add(this.button1);
             this.flowLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Fill;
             this.flowLayoutPanel2.FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft;
-            this.flowLayoutPanel2.Location = new System.Drawing.Point(240, 315);
-            this.flowLayoutPanel2.Margin = new System.Windows.Forms.Padding(3, 33, 3, 3);
+            this.flowLayoutPanel2.Location = new System.Drawing.Point(240, 349);
+            this.flowLayoutPanel2.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
             this.flowLayoutPanel2.Name = "flowLayoutPanel2";
             this.flowLayoutPanel2.Size = new System.Drawing.Size(165, 38);
             this.flowLayoutPanel2.TabIndex = 14;
+            // 
+            // flowLayoutPanelPin
+            // 
+            this.flowLayoutPanelPin.AutoSize = true;
+            this.flowLayoutPanelPin.Controls.Add(this.button8);
+            this.flowLayoutPanelPin.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.flowLayoutPanelPin.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
+            this.flowLayoutPanelPin.Location = new System.Drawing.Point(15, 285);
+            this.flowLayoutPanelPin.Margin = new System.Windows.Forms.Padding(3, 3, 3, 0);
+            this.flowLayoutPanelPin.Name = "flowLayoutPanelPin";
+            this.flowLayoutPanelPin.Size = new System.Drawing.Size(217, 32);
+            this.flowLayoutPanelPin.TabIndex = 18;
+            this.flowLayoutPanelPin.WrapContents = false;
             // 
             // flowLayoutPanelShare
             // 
@@ -141,8 +159,8 @@
             this.flowLayoutPanelShare.Controls.Add(this.button7);
             this.flowLayoutPanelShare.Dock = System.Windows.Forms.DockStyle.Fill;
             this.flowLayoutPanelShare.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
-            this.flowLayoutPanelShare.Location = new System.Drawing.Point(15, 315);
-            this.flowLayoutPanelShare.Margin = new System.Windows.Forms.Padding(3, 33, 3, 3);
+            this.flowLayoutPanelShare.Location = new System.Drawing.Point(15, 349);
+            this.flowLayoutPanelShare.Margin = new System.Windows.Forms.Padding(3, 3, 3, 3);
             this.flowLayoutPanelShare.Name = "flowLayoutPanelShare";
             this.flowLayoutPanelShare.Size = new System.Drawing.Size(217, 38);
             this.flowLayoutPanelShare.TabIndex = 17;
@@ -163,6 +181,20 @@
             this.button1.Text = "検出を開始";
             this.button1.UseVisualStyleBackColor = false;
             this.button1.Click += new System.EventHandler(this.Button1_Click);
+            // 
+            // button8
+            // 
+            this.button8.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(241)))), ((int)(((byte)(245)))), ((int)(((byte)(249)))));
+            this.button8.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(203)))), ((int)(((byte)(213)))), ((int)(((byte)(225)))));
+            this.button8.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.button8.Location = new System.Drawing.Point(0, 0);
+            this.button8.Margin = new System.Windows.Forms.Padding(0, 0, 4, 0);
+            this.button8.Name = "button8";
+            this.button8.Size = new System.Drawing.Size(58, 32);
+            this.button8.TabIndex = 11;
+            this.button8.Text = "ピン";
+            this.button8.UseVisualStyleBackColor = false;
+            this.button8.Click += new System.EventHandler(this.Button8_Click);
             // 
             // button5
             // 
@@ -333,6 +365,7 @@
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
             this.flowLayoutPanel2.ResumeLayout(false);
+            this.flowLayoutPanelPin.ResumeLayout(false);
             this.flowLayoutPanelShare.ResumeLayout(false);
             this.flowLayoutPanel1.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxMap)).EndInit();
@@ -345,8 +378,10 @@
         private System.Windows.Forms.Timer timer1;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
         private System.Windows.Forms.FlowLayoutPanel flowLayoutPanel2;
+        private System.Windows.Forms.FlowLayoutPanel flowLayoutPanelPin;
         private System.Windows.Forms.FlowLayoutPanel flowLayoutPanelShare;
         private System.Windows.Forms.Button button1;
+        private System.Windows.Forms.Button button8;
         private System.Windows.Forms.Button button5;
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.Button button7;

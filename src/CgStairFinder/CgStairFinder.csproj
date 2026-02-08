@@ -78,9 +78,11 @@
     <Compile Include="Defined.cs" />
     <Compile Include="DetectLog.cs" />
     <Compile Include="HistoryShareService.cs" />
+    <Compile Include="LocalPinStore.cs" />
     <Compile Include="Main.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="MapPin.cs" />
     <Compile Include="Main.Designer.cs">
       <DependentUpon>Main.cs</DependentUpon>
     </Compile>

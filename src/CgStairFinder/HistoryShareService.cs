@@ -11,7 +11,7 @@ namespace CgStairFinder
 {
     internal static class HistoryShareService
     {
-        private const int CurrentSchemaVersion = 2;
+        private const int CurrentSchemaVersion = 3;
 
         [DataContract]
         private sealed class SharedHistoryFile
@@ -46,6 +46,9 @@ namespace CgStairFinder
 
             [DataMember(Name = "stairs")]
             public List<SharedStair> Stairs { get; set; }
+
+            [DataMember(Name = "pins", EmitDefaultValue = false)]
+            public List<SharedPin> Pins { get; set; }
         }
 
         [DataContract]
@@ -59,6 +62,22 @@ namespace CgStairFinder
 
             [DataMember(Name = "type")]
             public int Type { get; set; }
+        }
+
+        [DataContract]
+        private sealed class SharedPin
+        {
+            [DataMember(Name = "east")]
+            public int East { get; set; }
+
+            [DataMember(Name = "south")]
+            public int South { get; set; }
+
+            [DataMember(Name = "title")]
+            public string Title { get; set; }
+
+            [DataMember(Name = "detail")]
+            public string Detail { get; set; }
         }
 
         [DataContract]
@@ -101,6 +120,9 @@ namespace CgStairFinder
             public int SkippedMapFiles { get; set; }
             public int InvalidMapFiles { get; set; }
             public int FailedMapFiles { get; set; }
+
+            public int PinMaps { get; set; }
+            public int ImportedPins { get; set; }
         }
 
         public static string ExportToJson(IEnumerable<DetectLog> logs)
@@ -128,8 +150,19 @@ namespace CgStairFinder
             bool includeMapFiles,
             Func<DetectLog, MapFileExportItem> mapFileLoader)
         {
+            return ExportCompressed(outputPath, logs, includeMapFiles, mapFileLoader, false, null);
+        }
+
+        public static ExportResult ExportCompressed(
+            string outputPath,
+            IEnumerable<DetectLog> logs,
+            bool includeMapFiles,
+            Func<DetectLog, MapFileExportItem> mapFileLoader,
+            bool includePins,
+            Func<string, IEnumerable<MapPin>> mapPinLoader)
+        {
             int missingMapFiles;
-            var payload = BuildPayload(logs, includeMapFiles, mapFileLoader, out missingMapFiles);
+            var payload = BuildPayload(logs, includeMapFiles, mapFileLoader, includePins, mapPinLoader, out missingMapFiles);
             var json = ExportPayloadToJson(payload);
             var bytes = Encoding.UTF8.GetBytes(json);
 
@@ -155,7 +188,7 @@ namespace CgStairFinder
             }
 
             var payload = DeserializePayload(json);
-            return MergePayload(payload, targetLogs);
+            return MergePayload(payload, targetLogs, null);
         }
 
         public static ImportResult Import(string inputPath, IDictionary<string, DetectLog> targetLogs)
@@ -171,12 +204,22 @@ namespace CgStairFinder
 
         public static ImportResult ImportCompressed(string inputPath, IDictionary<string, DetectLog> targetLogs, string mapDirectory)
         {
-            return ImportCompressed(inputPath, targetLogs, mapDirectory, false);
+            return ImportCompressed(inputPath, targetLogs, null, mapDirectory, false);
         }
 
         public static ImportResult ImportCompressed(
             string inputPath,
             IDictionary<string, DetectLog> targetLogs,
+            string mapDirectory,
+            bool overwriteExistingMapFiles)
+        {
+            return ImportCompressed(inputPath, targetLogs, null, mapDirectory, overwriteExistingMapFiles);
+        }
+
+        public static ImportResult ImportCompressed(
+            string inputPath,
+            IDictionary<string, DetectLog> targetLogs,
+            IDictionary<string, IList<MapPin>> targetPins,
             string mapDirectory,
             bool overwriteExistingMapFiles)
         {
@@ -205,7 +248,7 @@ namespace CgStairFinder
             }
 
             var payload = DeserializePayload(json);
-            var result = MergePayload(payload, targetLogs);
+            var result = MergePayload(payload, targetLogs, targetPins);
             MergeMapFiles(payload, mapDirectory, overwriteExistingMapFiles, result);
             return result;
         }
@@ -213,30 +256,38 @@ namespace CgStairFinder
         private static SharedHistoryFile BuildPayload(IEnumerable<DetectLog> logs)
         {
             int unused;
-            return BuildPayload(logs, false, null, out unused);
+            return BuildPayload(logs, false, null, false, null, out unused);
         }
 
         private static SharedHistoryFile BuildPayload(
             IEnumerable<DetectLog> logs,
             bool includeMapFiles,
             Func<DetectLog, MapFileExportItem> mapFileLoader,
+            bool includePins,
+            Func<string, IEnumerable<MapPin>> mapPinLoader,
             out int missingMapFiles)
         {
             missingMapFiles = 0;
             var validLogs = (logs ?? Enumerable.Empty<DetectLog>())
-                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
-                .OrderBy(x => x.DetectTime)
+                .Where(x => x != null)
+                .Select(x => new
+                {
+                    Log = x,
+                    MapCode = NormalizeMapCode(x.MapCode)
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.MapCode))
+                .OrderBy(x => x.Log.DetectTime)
                 .ToList();
 
             List<SharedMapFile> mapFiles = null;
             if (includeMapFiles && mapFileLoader != null)
             {
                 mapFiles = new List<SharedMapFile>();
-                foreach (var log in validLogs
+                foreach (var item in validLogs
                     .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
-                    .Select(g => g.OrderByDescending(x => x.DetectTime).First()))
+                    .Select(g => g.OrderByDescending(x => x.Log.DetectTime).First()))
                 {
-                    var loaded = mapFileLoader(log);
+                    var loaded = mapFileLoader(item.Log);
                     if (loaded?.Data == null || loaded.Data.Length == 0)
                     {
                         missingMapFiles++;
@@ -246,16 +297,16 @@ namespace CgStairFinder
                     var relativePath = NormalizeRelativePath(loaded.RelativePath);
                     if (string.IsNullOrWhiteSpace(relativePath))
                     {
-                        relativePath = NormalizeRelativePath(log.MapRelativePath);
+                        relativePath = NormalizeRelativePath(item.Log.MapRelativePath);
                     }
                     if (string.IsNullOrWhiteSpace(relativePath))
                     {
-                        relativePath = NormalizeRelativePath(log.MapCode);
+                        relativePath = NormalizeRelativePath(item.MapCode);
                     }
 
                     mapFiles.Add(new SharedMapFile
                     {
-                        MapCode = log.MapCode,
+                        MapCode = item.MapCode,
                         RelativePath = relativePath,
                         Data = loaded.Data
                     });
@@ -266,7 +317,13 @@ namespace CgStairFinder
             {
                 SchemaVersion = CurrentSchemaVersion,
                 ExportedAt = DateTime.Now,
-                Entries = validLogs.Select(ToSharedEntry).ToList(),
+                Entries = validLogs.Select(item =>
+                    ToSharedEntry(
+                        item.Log,
+                        item.MapCode,
+                        includePins && mapPinLoader != null
+                            ? mapPinLoader(item.MapCode)
+                            : null)).ToList(),
                 MapFiles = mapFiles != null && mapFiles.Count > 0 ? mapFiles : null
             };
         }
@@ -295,7 +352,10 @@ namespace CgStairFinder
             }
         }
 
-        private static ImportResult MergePayload(SharedHistoryFile payload, IDictionary<string, DetectLog> targetLogs)
+        private static ImportResult MergePayload(
+            SharedHistoryFile payload,
+            IDictionary<string, DetectLog> targetLogs,
+            IDictionary<string, IList<MapPin>> targetPins)
         {
             var result = new ImportResult();
             if (payload?.Entries == null)
@@ -319,6 +379,7 @@ namespace CgStairFinder
                 {
                     targetLogs[detectLog.MapCode] = detectLog;
                     result.Added++;
+                    MergeEntryPins(targetPins, detectLog.MapCode, entry.Pins, result);
                     continue;
                 }
 
@@ -331,9 +392,38 @@ namespace CgStairFinder
                 {
                     result.Skipped++;
                 }
+
+                MergeEntryPins(targetPins, detectLog.MapCode, entry.Pins, result);
             }
 
             return result;
+        }
+
+        private static void MergeEntryPins(
+            IDictionary<string, IList<MapPin>> targetPins,
+            string mapCode,
+            IEnumerable<SharedPin> sharedPins,
+            ImportResult result)
+        {
+            if (targetPins == null || sharedPins == null || string.IsNullOrWhiteSpace(mapCode) || result == null)
+            {
+                return;
+            }
+
+            var pins = sharedPins
+                .Select(ToMapPin)
+                .Where(x => x != null)
+                .ToList();
+
+            if (pins.Count == 0)
+            {
+                targetPins.Remove(mapCode);
+                return;
+            }
+
+            targetPins[mapCode] = pins;
+            result.PinMaps++;
+            result.ImportedPins += pins.Count;
         }
 
         private static void MergeMapFiles(
@@ -498,11 +588,16 @@ namespace CgStairFinder
             return string.Join("\\", segments);
         }
 
-        private static SharedHistoryEntry ToSharedEntry(DetectLog log)
+        private static SharedHistoryEntry ToSharedEntry(DetectLog log, string normalizedMapCode, IEnumerable<MapPin> pins)
         {
+            var sharedPins = (pins ?? Enumerable.Empty<MapPin>())
+                .Select(ToSharedPin)
+                .Where(x => x != null)
+                .ToList();
+
             return new SharedHistoryEntry
             {
-                MapCode = log.MapCode,
+                MapCode = normalizedMapCode,
                 MapRelativePath = log.MapRelativePath,
                 MapName = log.MapName,
                 DetectTime = log.DetectTime,
@@ -511,13 +606,15 @@ namespace CgStairFinder
                     East = stair.East,
                     South = stair.South,
                     Type = (int)stair.Type
-                }).ToList()
+                }).ToList(),
+                Pins = sharedPins.Count > 0 ? sharedPins : null
             };
         }
 
         private static DetectLog ToDetectLog(SharedHistoryEntry entry)
         {
-            if (entry == null || string.IsNullOrWhiteSpace(entry.MapCode))
+            var mapCode = NormalizeMapCode(entry?.MapCode);
+            if (entry == null || string.IsNullOrWhiteSpace(mapCode))
             {
                 return null;
             }
@@ -538,7 +635,7 @@ namespace CgStairFinder
 
             return new DetectLog
             {
-                MapCode = entry.MapCode,
+                MapCode = mapCode,
                 MapRelativePath = entry.MapRelativePath ?? string.Empty,
                 MapName = entry.MapName ?? string.Empty,
                 DetectTime = entry.DetectTime == default(DateTime) ? DateTime.MinValue : entry.DetectTime,
@@ -546,11 +643,62 @@ namespace CgStairFinder
             };
         }
 
+        private static string NormalizeMapCode(string mapCode)
+        {
+            if (string.IsNullOrWhiteSpace(mapCode))
+            {
+                return null;
+            }
+
+            var normalized = mapCode.Trim().Replace('/', '\\');
+            try
+            {
+                return Path.GetFileName(normalized);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return normalized;
+            }
+        }
+
         private static StairType ToStairType(int type)
         {
             return Enum.IsDefined(typeof(StairType), type)
                 ? (StairType)type
                 : StairType.Unknow;
+        }
+
+        private static SharedPin ToSharedPin(MapPin pin)
+        {
+            var normalized = MapPin.Normalize(pin);
+            if (normalized == null)
+            {
+                return null;
+            }
+
+            return new SharedPin
+            {
+                East = normalized.East,
+                South = normalized.South,
+                Title = normalized.Title,
+                Detail = normalized.Detail ?? string.Empty
+            };
+        }
+
+        private static MapPin ToMapPin(SharedPin pin)
+        {
+            if (pin == null)
+            {
+                return null;
+            }
+
+            return MapPin.Normalize(new MapPin
+            {
+                East = pin.East,
+                South = pin.South,
+                Title = pin.Title,
+                Detail = pin.Detail
+            });
         }
     }
 }
