@@ -35,6 +35,7 @@
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
             this.listBox1 = new System.Windows.Forms.ListBox();
             this.flowLayoutPanel2 = new System.Windows.Forms.FlowLayoutPanel();
+            this.flowLayoutPanelShare = new System.Windows.Forms.FlowLayoutPanel();
             this.button1 = new System.Windows.Forms.Button();
             this.button5 = new System.Windows.Forms.Button();
             this.button6 = new System.Windows.Forms.Button();
@@ -51,6 +52,7 @@
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxMap)).BeginInit();
             this.tableLayoutPanel2.SuspendLayout();
             this.flowLayoutPanel2.SuspendLayout();
+            this.flowLayoutPanelShare.SuspendLayout();
             this.flowLayoutPanel1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -67,7 +69,8 @@
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 40F));
             this.tableLayoutPanel2.Controls.Add(this.listBox1, 0, 3);
             this.tableLayoutPanel2.Controls.Add(this.pictureBoxMap, 1, 3);
-            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel2, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel2, 1, 4);
+            this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanelShare, 0, 4);
             this.tableLayoutPanel2.Controls.Add(this.flowLayoutPanel1, 0, 2);
             this.tableLayoutPanel2.Controls.Add(this.linkLabel2, 0, 0);
             this.tableLayoutPanel2.Controls.Add(this.label2, 0, 6);
@@ -121,17 +124,29 @@
             // flowLayoutPanel2
             // 
             this.flowLayoutPanel2.AutoSize = true;
-            this.tableLayoutPanel2.SetColumnSpan(this.flowLayoutPanel2, 2);
             this.flowLayoutPanel2.Controls.Add(this.button1);
-            this.flowLayoutPanel2.Controls.Add(this.button5);
-            this.flowLayoutPanel2.Controls.Add(this.button6);
-            this.flowLayoutPanel2.Controls.Add(this.button7);
             this.flowLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Fill;
             this.flowLayoutPanel2.FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft;
-            this.flowLayoutPanel2.Location = new System.Drawing.Point(15, 285);
+            this.flowLayoutPanel2.Location = new System.Drawing.Point(240, 315);
+            this.flowLayoutPanel2.Margin = new System.Windows.Forms.Padding(3, 33, 3, 3);
             this.flowLayoutPanel2.Name = "flowLayoutPanel2";
-            this.flowLayoutPanel2.Size = new System.Drawing.Size(314, 38);
+            this.flowLayoutPanel2.Size = new System.Drawing.Size(165, 38);
             this.flowLayoutPanel2.TabIndex = 14;
+            // 
+            // flowLayoutPanelShare
+            // 
+            this.flowLayoutPanelShare.AutoSize = true;
+            this.flowLayoutPanelShare.Controls.Add(this.button6);
+            this.flowLayoutPanelShare.Controls.Add(this.button5);
+            this.flowLayoutPanelShare.Controls.Add(this.button7);
+            this.flowLayoutPanelShare.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.flowLayoutPanelShare.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
+            this.flowLayoutPanelShare.Location = new System.Drawing.Point(15, 315);
+            this.flowLayoutPanelShare.Margin = new System.Windows.Forms.Padding(3, 33, 3, 3);
+            this.flowLayoutPanelShare.Name = "flowLayoutPanelShare";
+            this.flowLayoutPanelShare.Size = new System.Drawing.Size(217, 38);
+            this.flowLayoutPanelShare.TabIndex = 17;
+            this.flowLayoutPanelShare.WrapContents = false;
             // 
             // button1
             // 
@@ -140,7 +155,7 @@
             this.button1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button1.Font = new System.Drawing.Font("Meiryo UI", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.button1.ForeColor = System.Drawing.Color.White;
-            this.button1.Location = new System.Drawing.Point(196, 3);
+            this.button1.Location = new System.Drawing.Point(47, 3);
             this.button1.Margin = new System.Windows.Forms.Padding(3, 3, 0, 3);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(118, 32);
@@ -154,11 +169,12 @@
             this.button5.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(241)))), ((int)(((byte)(245)))), ((int)(((byte)(249)))));
             this.button5.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(203)))), ((int)(((byte)(213)))), ((int)(((byte)(225)))));
             this.button5.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.button5.Location = new System.Drawing.Point(118, 3);
+            this.button5.Location = new System.Drawing.Point(62, 3);
+            this.button5.Margin = new System.Windows.Forms.Padding(0, 3, 4, 3);
             this.button5.Name = "button5";
-            this.button5.Size = new System.Drawing.Size(72, 32);
+            this.button5.Size = new System.Drawing.Size(58, 32);
             this.button5.TabIndex = 8;
-            this.button5.Text = "コピー";
+            this.button5.Text = "出力";
             this.button5.UseVisualStyleBackColor = false;
             this.button5.Click += new System.EventHandler(this.Button5_Click);
             // 
@@ -167,11 +183,12 @@
             this.button6.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(241)))), ((int)(((byte)(245)))), ((int)(((byte)(249)))));
             this.button6.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(203)))), ((int)(((byte)(213)))), ((int)(((byte)(225)))));
             this.button6.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.button6.Location = new System.Drawing.Point(40, 3);
+            this.button6.Location = new System.Drawing.Point(0, 3);
+            this.button6.Margin = new System.Windows.Forms.Padding(0, 3, 4, 3);
             this.button6.Name = "button6";
-            this.button6.Size = new System.Drawing.Size(72, 32);
+            this.button6.Size = new System.Drawing.Size(58, 32);
             this.button6.TabIndex = 9;
-            this.button6.Text = "貼付";
+            this.button6.Text = "取込";
             this.button6.UseVisualStyleBackColor = false;
             this.button6.Click += new System.EventHandler(this.Button6_Click);
             // 
@@ -180,10 +197,10 @@
             this.button7.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(241)))), ((int)(((byte)(245)))), ((int)(((byte)(249)))));
             this.button7.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(203)))), ((int)(((byte)(213)))), ((int)(((byte)(225)))));
             this.button7.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.button7.Location = new System.Drawing.Point(0, 3);
+            this.button7.Location = new System.Drawing.Point(124, 3);
             this.button7.Margin = new System.Windows.Forms.Padding(0, 3, 0, 3);
             this.button7.Name = "button7";
-            this.button7.Size = new System.Drawing.Size(90, 32);
+            this.button7.Size = new System.Drawing.Size(80, 32);
             this.button7.TabIndex = 10;
             this.button7.Text = "共有削除";
             this.button7.UseVisualStyleBackColor = false;
@@ -278,7 +295,7 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.tableLayoutPanel2.SetColumnSpan(this.label2, 2);
             this.label2.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(100)))), ((int)(((byte)(116)))), ((int)(((byte)(139)))));
-            this.label2.Location = new System.Drawing.Point(15, 329);
+            this.label2.Location = new System.Drawing.Point(15, 359);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(314, 16);
             this.label2.TabIndex = 6;
@@ -316,6 +333,7 @@
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
             this.flowLayoutPanel2.ResumeLayout(false);
+            this.flowLayoutPanelShare.ResumeLayout(false);
             this.flowLayoutPanel1.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxMap)).EndInit();
             this.ResumeLayout(false);
@@ -327,6 +345,7 @@
         private System.Windows.Forms.Timer timer1;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
         private System.Windows.Forms.FlowLayoutPanel flowLayoutPanel2;
+        private System.Windows.Forms.FlowLayoutPanel flowLayoutPanelShare;
         private System.Windows.Forms.Button button1;
         private System.Windows.Forms.Button button5;
         private System.Windows.Forms.Button button6;

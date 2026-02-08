@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
@@ -77,6 +78,21 @@ namespace CgStairFinder
             return payload.Entries.Count;
         }
 
+        public static int ExportCompressed(string outputPath, IEnumerable<DetectLog> logs)
+        {
+            var payload = BuildPayload(logs);
+            var json = ExportPayloadToJson(payload);
+            var bytes = Encoding.UTF8.GetBytes(json);
+
+            using (var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var gzip = new GZipStream(fs, CompressionMode.Compress))
+            {
+                gzip.Write(bytes, 0, bytes.Length);
+            }
+
+            return payload.Entries.Count;
+        }
+
         public static ImportResult ImportFromJson(string json, IDictionary<string, DetectLog> targetLogs)
         {
             if (string.IsNullOrWhiteSpace(json))
@@ -98,6 +114,34 @@ namespace CgStairFinder
         {
             var json = File.ReadAllText(inputPath, Encoding.UTF8);
             return ImportFromJson(json, targetLogs);
+        }
+
+        public static ImportResult ImportCompressed(string inputPath, IDictionary<string, DetectLog> targetLogs)
+        {
+            byte[] compressed;
+            using (var fs = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                compressed = new byte[fs.Length];
+                fs.Read(compressed, 0, compressed.Length);
+            }
+
+            try
+            {
+                using (var input = new MemoryStream(compressed))
+                using (var gzip = new GZipStream(input, CompressionMode.Decompress))
+                using (var output = new MemoryStream())
+                {
+                    gzip.CopyTo(output);
+                    var json = Encoding.UTF8.GetString(output.ToArray());
+                    return ImportFromJson(json, targetLogs);
+                }
+            }
+            catch (InvalidDataException)
+            {
+                // 旧フォーマット(JSON生ファイル)も取り込めるようにしておく
+                var json = Encoding.UTF8.GetString(compressed);
+                return ImportFromJson(json, targetLogs);
+            }
         }
 
         private static SharedHistoryFile BuildPayload(IEnumerable<DetectLog> logs)

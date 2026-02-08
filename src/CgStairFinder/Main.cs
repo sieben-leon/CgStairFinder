@@ -43,6 +43,19 @@ namespace CgStairFinder
         private Button buttonRecenterMap;
         private Label labelMiniMapHint;
 
+        private sealed class ShareLogItem
+        {
+            public DetectLog Log { get; set; }
+            public bool IsSharedSource { get; set; }
+
+            public override string ToString()
+            {
+                var source = IsSharedSource ? "\u5171\u6709" : "\u30ED\u30FC\u30AB\u30EB";
+                var mapName = string.IsNullOrWhiteSpace(Log.MapName) ? string.Empty : string.Format(" ({0})", Log.MapName);
+                return string.Format("{0}{1} [{2}] {3:yyyy-MM-dd HH:mm:ss}", Log.MapCode, mapName, source, Log.DetectTime);
+            }
+        }
+
         public Main()
         {
             InitializeComponent();
@@ -457,6 +470,62 @@ namespace CgStairFinder
             PopulateStairList(mapCode, isSelectedWindow, latestEast, latestSouth, localStairs);
         }
 
+        private string ResolveMapNameForCurrentMap(string currentMapCode, string snapshotMapName, string previousMapCode, bool mapChanged, bool isSelectedWindow)
+        {
+            var normalized = (snapshotMapName ?? string.Empty).Trim();
+            if (!isSelectedWindow || !mapChanged || string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+
+            var previousMapName = GetKnownMapName(previousMapCode);
+            if (!string.IsNullOrWhiteSpace(previousMapName) &&
+                string.Equals(normalized, previousMapName, StringComparison.Ordinal))
+            {
+                var currentKnownName = GetKnownMapName(currentMapCode);
+                return string.IsNullOrWhiteSpace(currentKnownName) ? string.Empty : currentKnownName;
+            }
+
+            return normalized;
+        }
+
+        private static string ChooseStoredMapName(string preferredMapName, DetectLog existingLog)
+        {
+            var normalized = (preferredMapName ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+
+            if (existingLog != null && !string.IsNullOrWhiteSpace(existingLog.MapName))
+            {
+                return existingLog.MapName;
+            }
+
+            return string.Empty;
+        }
+
+        private static string GetKnownMapName(string mapCode)
+        {
+            if (string.IsNullOrWhiteSpace(mapCode))
+            {
+                return string.Empty;
+            }
+
+            DetectLog knownLog;
+            if (logs.TryGetValue(mapCode, out knownLog) && !string.IsNullOrWhiteSpace(knownLog.MapName))
+            {
+                return knownLog.MapName;
+            }
+
+            if (sharedLogs.TryGetValue(mapCode, out knownLog) && !string.IsNullOrWhiteSpace(knownLog.MapName))
+            {
+                return knownLog.MapName;
+            }
+
+            return string.Empty;
+        }
+
         private void Timer1_Tick(object sender, EventArgs e)
         {
             timer1.Interval = 500;
@@ -499,12 +568,17 @@ namespace CgStairFinder
                     throw new Exception("\u30DE\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002");
                 }
 
-                Text = string.IsNullOrWhiteSpace(mapName) ? mapFile.Name : mapName;
-                SetMapPathLabel(mapFile.FullName);
+                var currentMapCode = mapFile.Name;
+                var currentMapPath = mapFile.FullName;
+                var previousMapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
+                var mapChanged = !string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase);
+
+                mapName = ResolveMapNameForCurrentMap(currentMapCode, mapName, previousMapCode, mapChanged, isSelectedWindow);
+                Text = string.IsNullOrWhiteSpace(mapName) ? currentMapCode : mapName;
+                SetMapPathLabel(currentMapPath);
 
                 var mapData = new CgMapStairFinder(mapFile).GetMapData();
-                var currentMapPath = mapFile.FullName;
-                if (!string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase))
+                if (mapChanged)
                 {
                     latestMapPath = currentMapPath;
                     miniMapPanX = 0f;
@@ -518,16 +592,18 @@ namespace CgStairFinder
                 var cgStairs = mapData.Stairs;
                 if (cgStairs.Count > 0)
                 {
-                    logs[mapFile.Name] = new DetectLog
+                    DetectLog existingLog;
+                    logs.TryGetValue(currentMapCode, out existingLog);
+                    logs[currentMapCode] = new DetectLog
                     {
-                        MapCode = mapFile.Name,
-                        MapName = mapName,
+                        MapCode = currentMapCode,
+                        MapName = ChooseStoredMapName(mapName, existingLog),
                         CgStairs = cgStairs,
                         DetectTime = DateTime.Now
                     };
                 }
 
-                PopulateStairList(mapFile.Name, isSelectedWindow, east, south, cgStairs);
+                PopulateStairList(currentMapCode, isSelectedWindow, east, south, cgStairs);
             }
             catch (IOException)
             {
@@ -658,119 +734,166 @@ namespace CgStairFinder
 
         private void Button5_Click(object sender, EventArgs e)
         {
-            var exportLogs = logs.Values
-                .Concat(sharedLogs.Values)
-                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
-                .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.OrderByDescending(x => x.DetectTime).First())
-                .ToList();
-
-            if (!exportLogs.Any())
+            var candidates = BuildShareCandidates();
+            if (!candidates.Any())
             {
                 MessageBox.Show("\u8A18\u9332\u304C\u3042\u308A\u307E\u305B\u3093\u3002", "\u30E1\u30C3\u30BB\u30FC\u30B8", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            try
+            List<DetectLog> selectedLogs;
+            if (!TrySelectShareLogs(candidates, out selectedLogs))
             {
-                var json = HistoryShareService.ExportToJson(exportLogs);
-                Clipboard.SetText(json);
+                return;
+            }
+
+            if (!selectedLogs.Any())
+            {
                 MessageBox.Show(
                     this,
-                    string.Format("\u5C65\u6B74\u60C5\u5831\u3092\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u30DE\u30C3\u30D7", exportLogs.Count),
+                    "\u5171\u6709\u5BFE\u8C61\u304C\u9078\u629E\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002",
                     "\u30E1\u30C3\u30BB\u30FC\u30B8",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+                return;
             }
-            catch (Exception ex)
+
+            using (var dialog = new SaveFileDialog())
             {
-                MessageBox.Show(
-                    this,
-                    string.Format("\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u3078\u306E\u30B3\u30D4\u30FC\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
-                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                dialog.Title = "\u5171\u6709\u30C7\u30FC\u30BF\u306E\u51FA\u529B";
+                dialog.Filter = "\u5171\u6709\u30D5\u30A1\u30A4\u30EB (*.cgshare)|*.cgshare|JSON (*.json)|*.json|All files (*.*)|*.*";
+                dialog.DefaultExt = "cgshare";
+                dialog.AddExtension = true;
+                dialog.FileName = string.Format("cgshare_{0:yyyyMMdd_HHmmss}.cgshare", DateTime.Now);
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var count = HistoryShareService.ExportCompressed(dialog.FileName, selectedLogs);
+                    MessageBox.Show(
+                        this,
+                        string.Format(
+                            "\u5171\u6709\u30C7\u30FC\u30BF\u3092\u51FA\u529B\u3057\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u30DE\u30C3\u30D7\n{1}",
+                            count,
+                            dialog.FileName),
+                        "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        string.Format("\u5171\u6709\u30C7\u30FC\u30BF\u306E\u51FA\u529B\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
+                        "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
             }
         }
 
         private void Button6_Click(object sender, EventArgs e)
         {
-            string text;
-            if (!TryShowHistoryImportDialog(out text))
+            using (var dialog = new OpenFileDialog())
             {
-                return;
-            }
+                dialog.Title = "\u5171\u6709\u30C7\u30FC\u30BF\u306E\u53D6\u8FBC";
+                dialog.Filter = "\u5171\u6709\u30D5\u30A1\u30A4\u30EB (*.cgshare;*.json)|*.cgshare;*.json|All files (*.*)|*.*";
+                dialog.CheckFileExists = true;
+                dialog.Multiselect = false;
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
 
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                MessageBox.Show(
-                    this,
-                    "\u8CBC\u308A\u4ED8\u3051\u5185\u5BB9\u304C\u7A7A\u3067\u3059\u3002",
-                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            try
-            {
-                var result = HistoryShareService.ImportFromJson(text, sharedLogs);
-                RefreshStairListFromLatest();
-                MessageBox.Show(
-                    this,
-                    string.Format(
-                        "\u5171\u6709\u30C7\u30FC\u30BF\u3092\u53D6\u8FBC\u307F\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u4EF6\n\u8FFD\u52A0: {1} \u4EF6\n\u66F4\u65B0: {2} \u4EF6\n\u30B9\u30AD\u30C3\u30D7: {3} \u4EF6\n\u7121\u52B9: {4} \u4EF6",
-                        result.TotalEntries,
-                        result.Added,
-                        result.Updated,
-                        result.Skipped,
-                        result.Invalid),
-                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    this,
-                    string.Format("\u53D6\u8FBC\u307F\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
-                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                try
+                {
+                    var result = HistoryShareService.ImportCompressed(dialog.FileName, sharedLogs);
+                    RefreshStairListFromLatest();
+                    MessageBox.Show(
+                        this,
+                        string.Format(
+                            "\u5171\u6709\u30C7\u30FC\u30BF\u3092\u53D6\u8FBC\u307F\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u4EF6\n\u8FFD\u52A0: {1} \u4EF6\n\u66F4\u65B0: {2} \u4EF6\n\u30B9\u30AD\u30C3\u30D7: {3} \u4EF6\n\u7121\u52B9: {4} \u4EF6",
+                            result.TotalEntries,
+                            result.Added,
+                            result.Updated,
+                            result.Skipped,
+                            result.Invalid),
+                        "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        string.Format("\u53D6\u8FBC\u307F\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
+                        "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
             }
         }
 
-        private bool TryShowHistoryImportDialog(out string text)
+        private List<ShareLogItem> BuildShareCandidates()
         {
-            text = string.Empty;
+            var result = new List<ShareLogItem>();
+            var latestLocal = logs.Values
+                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
+                .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(x => x.DetectTime).First());
+            result.AddRange(latestLocal.Select(x => new ShareLogItem { Log = x, IsSharedSource = false }));
+
+            foreach (var shared in sharedLogs.Values.Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode)))
+            {
+                if (result.Any(x => string.Equals(x.Log.MapCode, shared.MapCode, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                result.Add(new ShareLogItem { Log = shared, IsSharedSource = true });
+            }
+
+            return result
+                .OrderBy(x => x.Log.MapCode, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private bool TrySelectShareLogs(IList<ShareLogItem> candidates, out List<DetectLog> selectedLogs)
+        {
+            selectedLogs = new List<DetectLog>();
 
             using (var form = new Form())
             using (var label = new Label())
-            using (var textBox = new TextBox())
+            using (var checkedList = new CheckedListBox())
             using (var buttonOk = new Button())
             using (var buttonCancel = new Button())
             {
-                form.Text = "\u5171\u6709\u5C65\u6B74\u306E\u53D6\u8FBC\u307F";
+                form.Text = "\u5171\u6709\u5BFE\u8C61\u306E\u9078\u629E";
                 form.StartPosition = FormStartPosition.CenterParent;
                 form.FormBorderStyle = FormBorderStyle.SizableToolWindow;
                 form.MinimizeBox = false;
                 form.MaximizeBox = false;
-                form.ClientSize = new Size(560, 380);
-                form.MinimumSize = new Size(500, 320);
+                form.ClientSize = new Size(520, 420);
+                form.MinimumSize = new Size(460, 320);
                 form.Font = Font;
 
                 label.AutoSize = false;
                 label.Dock = DockStyle.Top;
-                label.Height = 42;
-                label.TextAlign = ContentAlignment.MiddleLeft;
+                label.Height = 36;
                 label.Padding = new Padding(8, 6, 8, 0);
-                label.Text = "\u4ED6\u306E\u4EBA\u304B\u3089\u53D7\u3051\u53D6\u3063\u305F\u5171\u6709\u6587\u5B57\u5217\u3092\u8CBC\u308A\u4ED8\u3051\u3066\u3001\u300C\u53D6\u8FBC\u307F\u300D\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+                label.TextAlign = ContentAlignment.MiddleLeft;
+                label.Text = "\u5171\u6709\u3059\u308B\u30DE\u30C3\u30D7\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
 
-                textBox.Multiline = true;
-                textBox.ScrollBars = ScrollBars.Both;
-                textBox.WordWrap = false;
-                textBox.Dock = DockStyle.Fill;
-                textBox.Font = new Font("Consolas", 9f);
+                checkedList.Dock = DockStyle.Fill;
+                checkedList.CheckOnClick = true;
+                checkedList.HorizontalScrollbar = true;
+                for (var i = 0; i < candidates.Count; i++)
+                {
+                    checkedList.Items.Add(candidates[i], true);
+                }
 
                 var buttonPanel = new FlowLayoutPanel
                 {
@@ -780,7 +903,7 @@ namespace CgStairFinder
                     Padding = new Padding(8, 6, 8, 6)
                 };
 
-                buttonOk.Text = "\u53D6\u8FBC\u307F";
+                buttonOk.Text = "\u6B21\u3078";
                 buttonOk.Width = 88;
                 buttonOk.DialogResult = DialogResult.OK;
 
@@ -791,7 +914,7 @@ namespace CgStairFinder
                 buttonPanel.Controls.Add(buttonOk);
                 buttonPanel.Controls.Add(buttonCancel);
 
-                form.Controls.Add(textBox);
+                form.Controls.Add(checkedList);
                 form.Controls.Add(buttonPanel);
                 form.Controls.Add(label);
                 form.AcceptButton = buttonOk;
@@ -802,7 +925,10 @@ namespace CgStairFinder
                     return false;
                 }
 
-                text = textBox.Text;
+                selectedLogs = checkedList.CheckedItems
+                    .Cast<ShareLogItem>()
+                    .Select(x => x.Log)
+                    .ToList();
                 return true;
             }
         }
