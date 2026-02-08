@@ -93,7 +93,7 @@ namespace CgStairFinder
                     var p = ScaleToMapRect(mapRect, mapData.Width, mapData.Height, stair.East, stair.South);
                     using (var brush = new SolidBrush(GetStairColor(stair.Type)))
                     {
-                        g.FillEllipse(brush, p.X - 2f, p.Y - 2f, 4f, 4f);
+                        g.FillEllipse(brush, p.X - 4f, p.Y - 4f, 8f, 8f);
                     }
                 }
 
@@ -293,9 +293,9 @@ namespace CgStairFinder
                 case StairType.Down:
                     return Color.FromArgb(239, 68, 68);
                 case StairType.Jump:
-                    return Color.FromArgb(100, 116, 139);
-                default:
                     return Color.FromArgb(245, 158, 11);
+                default:
+                    return Color.FromArgb(203, 213, 225);
             }
         }
 
