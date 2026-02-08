@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
@@ -23,6 +24,7 @@ namespace CgStairFinder
             CgMapStairFinder.CgMapData mapData,
             int? east,
             int? south,
+            IEnumerable<MapPin> pins,
             bool showTerrain,
             bool freezeTerrainLayer,
             float zoom,
@@ -94,6 +96,24 @@ namespace CgStairFinder
                     using (var brush = new SolidBrush(GetStairColor(stair.Type)))
                     {
                         g.FillEllipse(brush, p.X - 4f, p.Y - 4f, 8f, 8f);
+                    }
+                }
+
+                foreach (var pin in pins ?? Array.Empty<MapPin>())
+                {
+                    if (pin == null ||
+                        pin.East < 0 || pin.East >= mapData.Width ||
+                        pin.South < 0 || pin.South >= mapData.Height)
+                    {
+                        continue;
+                    }
+
+                    var p = ScaleToMapRect(mapRect, mapData.Width, mapData.Height, pin.East, pin.South);
+                    using (var markerBrush = new SolidBrush(Color.FromArgb(192, 132, 252)))
+                    using (var markerPen = new Pen(Color.White, 1.2f))
+                    {
+                        g.FillEllipse(markerBrush, p.X - 3.5f, p.Y - 3.5f, 7f, 7f);
+                        g.DrawEllipse(markerPen, p.X - 3.5f, p.Y - 3.5f, 7f, 7f);
                     }
                 }
 

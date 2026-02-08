@@ -43,6 +43,7 @@ namespace CgStairFinder
         private int miniMapLastDragRenderTick;
 
         private Button buttonRecenterMap;
+        private Button buttonManagePins;
         private Label labelMiniMapHint;
 
         private enum StairListItemType
@@ -64,6 +65,22 @@ namespace CgStairFinder
             public override string ToString()
             {
                 return Text ?? string.Empty;
+            }
+        }
+
+        private sealed class LocalPinManagerItem
+        {
+            public string MapCode { get; set; }
+            public MapPin Pin { get; set; }
+
+            public override string ToString()
+            {
+                if (Pin == null)
+                {
+                    return MapCode ?? string.Empty;
+                }
+
+                return string.Format("{0} | 東{1}、南{2} -- {3}", MapCode, Pin.East, Pin.South, Pin.Title);
             }
         }
 
@@ -89,6 +106,7 @@ namespace CgStairFinder
         {
             LoadLocalPins();
             InitializeMiniMapInteractions();
+            EnsurePinManageButton();
             EnsureMiniMapHintLabel();
             SetCgDirDisplayText();
             CgListReload(true);
@@ -144,6 +162,26 @@ namespace CgStairFinder
             };
             tableLayoutPanel2.Controls.Add(labelMiniMapHint, 0, 6);
             tableLayoutPanel2.SetColumnSpan(labelMiniMapHint, 2);
+        }
+
+        private void EnsurePinManageButton()
+        {
+            if (buttonManagePins != null || flowLayoutPanelPin == null)
+            {
+                return;
+            }
+
+            buttonManagePins = new Button
+            {
+                Text = "ピン管理",
+                Size = new Size(74, 32),
+                Margin = new Padding(0, 0, 0, 0),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(241, 245, 249)
+            };
+            buttonManagePins.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            buttonManagePins.Click += ButtonManagePins_Click;
+            flowLayoutPanelPin.Controls.Add(buttonManagePins);
         }
 
         private void ButtonRecenterMap_Click(object sender, EventArgs e)
@@ -416,11 +454,13 @@ namespace CgStairFinder
                 return;
             }
 
+            var miniMapPins = GetCurrentMapPinsForMiniMap();
             var bitmap = MiniMapRenderer.Render(
                 pictureBoxMap.ClientSize,
                 mapData,
                 east,
                 south,
+                miniMapPins,
                 checkBoxShowTerrain.Checked,
                 miniMapDragging,
                 miniMapZoom,
@@ -541,6 +581,22 @@ namespace CgStairFinder
         {
             var prefix = isShared ? "\uFF0A" : string.Empty;
             return string.Format("{0}\u6771{1}\u3001\u5357{2} -- {3}", prefix, pin.East, pin.South, pin.Title);
+        }
+
+        private IEnumerable<MapPin> GetCurrentMapPinsForMiniMap()
+        {
+            var mapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
+            if (string.IsNullOrWhiteSpace(mapCode))
+            {
+                return Enumerable.Empty<MapPin>();
+            }
+
+            return GetMapPins(localPins, mapCode)
+                .Concat(GetMapPins(sharedPins, mapCode))
+                .Where(x => x != null)
+                .GroupBy(x => new { x.East, x.South, x.Title })
+                .Select(x => x.First())
+                .ToList();
         }
 
         private static IEnumerable<MapPin> GetMapPins(IDictionary<string, IList<MapPin>> pinSource, string mapCode)
@@ -898,6 +954,7 @@ namespace CgStairFinder
                 return;
             }
 
+            var action = string.Empty;
             using (var form = new Form())
             using (var table = new TableLayoutPanel())
             using (var labelCoord = new Label())
@@ -905,6 +962,7 @@ namespace CgStairFinder
             using (var textDetail = new TextBox())
             using (var buttonPanel = new FlowLayoutPanel())
             using (var buttonDelete = new Button())
+            using (var buttonSaveLocal = new Button())
             using (var buttonClose = new Button())
             {
                 form.Text = isShared ? "共有ピン" : "ローカルピン";
@@ -952,22 +1010,72 @@ namespace CgStairFinder
                 buttonDelete.Width = 88;
                 buttonDelete.Click += (s, e) =>
                 {
-                    form.Tag = "delete";
+                    action = "delete";
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 };
 
                 buttonPanel.Controls.Add(buttonClose);
+                if (isShared)
+                {
+                    buttonSaveLocal.Text = "ローカル保存";
+                    buttonSaveLocal.Width = 104;
+                    buttonSaveLocal.Click += (s, e) =>
+                    {
+                        action = "save-local";
+                        form.DialogResult = DialogResult.OK;
+                        form.Close();
+                    };
+                    buttonPanel.Controls.Add(buttonSaveLocal);
+                }
                 buttonPanel.Controls.Add(buttonDelete);
                 table.Controls.Add(buttonPanel, 0, 3);
 
                 form.Controls.Add(table);
                 form.CancelButton = buttonClose;
 
-                if (form.ShowDialog(this) != DialogResult.OK || !string.Equals(form.Tag as string, "delete", StringComparison.Ordinal))
+                if (form.ShowDialog(this) != DialogResult.OK)
                 {
                     return;
                 }
+            }
+
+            if (string.Equals(action, "save-local", StringComparison.Ordinal))
+            {
+                var normalizedMapCode = NormalizeMapCode(mapCode);
+                if (string.IsNullOrWhiteSpace(normalizedMapCode))
+                {
+                    MessageBox.Show(
+                        this,
+                        "マップ情報が取得できないため、ローカル保存できませんでした。",
+                        "メッセージ",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                var normalizedPin = MapPin.Normalize(pin);
+                if (normalizedPin == null)
+                {
+                    MessageBox.Show(
+                        this,
+                        "ピン情報が不正なため、ローカル保存できませんでした。",
+                        "メッセージ",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                AddOrUpdateLocalPin(normalizedMapCode, normalizedPin);
+                SaveLocalPins();
+                RefreshStairListFromLatest();
+                RefreshMiniMap();
+                return;
+            }
+
+            if (!string.Equals(action, "delete", StringComparison.Ordinal))
+            {
+                return;
             }
 
             if (!TryDeletePin(mapCode, pin, isShared))
@@ -987,6 +1095,7 @@ namespace CgStairFinder
             }
 
             RefreshStairListFromLatest();
+            RefreshMiniMap();
         }
 
         private bool TryDeletePin(string mapCode, MapPin pin, bool isShared)
@@ -1146,6 +1255,131 @@ namespace CgStairFinder
             AddOrUpdateLocalPin(mapCode, newPin);
             SaveLocalPins();
             RefreshStairListFromLatest();
+        }
+
+        private void ButtonManagePins_Click(object sender, EventArgs e)
+        {
+            ShowPinManagerDialog();
+        }
+
+        private void ShowPinManagerDialog()
+        {
+            using (var form = new Form())
+            using (var table = new TableLayoutPanel())
+            using (var list = new ListBox())
+            using (var buttonPanel = new FlowLayoutPanel())
+            using (var buttonDelete = new Button())
+            using (var buttonClose = new Button())
+            {
+                form.Text = "ピン管理";
+                form.StartPosition = FormStartPosition.CenterParent;
+                form.FormBorderStyle = FormBorderStyle.SizableToolWindow;
+                form.MinimizeBox = false;
+                form.MaximizeBox = false;
+                form.ClientSize = new Size(430, 320);
+                form.Font = Font;
+
+                table.Dock = DockStyle.Fill;
+                table.Padding = new Padding(10);
+                table.ColumnCount = 1;
+                table.RowCount = 2;
+                table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+                table.RowStyles.Add(new RowStyle());
+
+                list.Dock = DockStyle.Fill;
+                list.IntegralHeight = false;
+                table.Controls.Add(list, 0, 0);
+
+                buttonPanel.Dock = DockStyle.Fill;
+                buttonPanel.FlowDirection = FlowDirection.RightToLeft;
+                buttonPanel.WrapContents = false;
+
+                buttonClose.Text = "閉じる";
+                buttonClose.Width = 88;
+                buttonClose.DialogResult = DialogResult.Cancel;
+
+                buttonDelete.Text = "削除";
+                buttonDelete.Width = 88;
+                buttonDelete.Click += (s, e) =>
+                {
+                    var selected = list.SelectedItem as LocalPinManagerItem;
+                    if (selected == null || selected.Pin == null || string.IsNullOrWhiteSpace(selected.MapCode))
+                    {
+                        return;
+                    }
+
+                    if (!RemovePin(localPins, selected.MapCode, selected.Pin))
+                    {
+                        MessageBox.Show(
+                            form,
+                            "選択したピンを削除できませんでした。",
+                            "メッセージ",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    SaveLocalPins();
+                    ReloadPinManagerList(list, buttonDelete);
+                    RefreshStairListFromLatest();
+                    RefreshMiniMap();
+                };
+
+                buttonPanel.Controls.Add(buttonClose);
+                buttonPanel.Controls.Add(buttonDelete);
+                table.Controls.Add(buttonPanel, 0, 1);
+
+                form.Controls.Add(table);
+                form.CancelButton = buttonClose;
+
+                ReloadPinManagerList(list, buttonDelete);
+                form.ShowDialog(this);
+            }
+        }
+
+        private void ReloadPinManagerList(ListBox list, Control deleteButton)
+        {
+            if (list == null)
+            {
+                return;
+            }
+
+            list.BeginUpdate();
+            try
+            {
+                list.Items.Clear();
+                foreach (var item in GetLocalPinManagerItems())
+                {
+                    list.Items.Add(item);
+                }
+            }
+            finally
+            {
+                list.EndUpdate();
+            }
+
+            if (deleteButton != null)
+            {
+                deleteButton.Enabled = list.Items.Count > 0;
+            }
+        }
+
+        private IEnumerable<LocalPinManagerItem> GetLocalPinManagerItems()
+        {
+            return localPins
+                .SelectMany(x =>
+                    (x.Value ?? Enumerable.Empty<MapPin>())
+                    .Where(p => p != null)
+                    .Select(p => new LocalPinManagerItem
+                    {
+                        MapCode = NormalizeMapCode(x.Key),
+                        Pin = p
+                    }))
+                .OrderBy(x => x.MapCode)
+                .ThenBy(x => x.Pin?.East ?? 0)
+                .ThenBy(x => x.Pin?.South ?? 0)
+                .ThenBy(x => x.Pin?.Title ?? string.Empty)
+                .ToList();
         }
 
         private bool TryGetCurrentMapContext(out string mapCode, out int east, out int south)
