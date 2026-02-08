@@ -614,6 +614,149 @@ namespace CgStairFinder
             Process.Start("notepad.exe", tmpPath);
         }
 
+        private void Button5_Click(object sender, EventArgs e)
+        {
+            if (!logs.Any())
+            {
+                MessageBox.Show("\u8A18\u9332\u304C\u3042\u308A\u307E\u305B\u3093\u3002", "\u30E1\u30C3\u30BB\u30FC\u30B8", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                var json = HistoryShareService.ExportToJson(logs.Values);
+                Clipboard.SetText(json);
+                MessageBox.Show(
+                    this,
+                    string.Format("\u5C65\u6B74\u60C5\u5831\u3092\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u30DE\u30C3\u30D7", logs.Count),
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format("\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u3078\u306E\u30B3\u30D4\u30FC\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private void Button6_Click(object sender, EventArgs e)
+        {
+            string text;
+            if (!TryShowHistoryImportDialog(out text))
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                MessageBox.Show(
+                    this,
+                    "\u8CBC\u308A\u4ED8\u3051\u5185\u5BB9\u304C\u7A7A\u3067\u3059\u3002",
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                var result = HistoryShareService.ImportFromJson(text, logs);
+                MessageBox.Show(
+                    this,
+                    string.Format(
+                        "\u8CBC\u4ED8\u30C6\u30AD\u30B9\u30C8\u304B\u3089\u53D6\u8FBC\u307F\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u4EF6\n\u8FFD\u52A0: {1} \u4EF6\n\u66F4\u65B0: {2} \u4EF6\n\u30B9\u30AD\u30C3\u30D7: {3} \u4EF6\n\u7121\u52B9: {4} \u4EF6",
+                        result.TotalEntries,
+                        result.Added,
+                        result.Updated,
+                        result.Skipped,
+                        result.Invalid),
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format("\u53D6\u8FBC\u307F\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private bool TryShowHistoryImportDialog(out string text)
+        {
+            text = string.Empty;
+
+            using (var form = new Form())
+            using (var label = new Label())
+            using (var textBox = new TextBox())
+            using (var buttonOk = new Button())
+            using (var buttonCancel = new Button())
+            {
+                form.Text = "\u5171\u6709\u5C65\u6B74\u306E\u53D6\u8FBC\u307F";
+                form.StartPosition = FormStartPosition.CenterParent;
+                form.FormBorderStyle = FormBorderStyle.SizableToolWindow;
+                form.MinimizeBox = false;
+                form.MaximizeBox = false;
+                form.ClientSize = new Size(560, 380);
+                form.MinimumSize = new Size(500, 320);
+                form.Font = Font;
+
+                label.AutoSize = false;
+                label.Dock = DockStyle.Top;
+                label.Height = 42;
+                label.TextAlign = ContentAlignment.MiddleLeft;
+                label.Padding = new Padding(8, 6, 8, 0);
+                label.Text = "\u4ED6\u306E\u4EBA\u304B\u3089\u53D7\u3051\u53D6\u3063\u305F\u5171\u6709\u6587\u5B57\u5217\u3092\u8CBC\u308A\u4ED8\u3051\u3066\u3001\u300C\u53D6\u8FBC\u307F\u300D\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+
+                textBox.Multiline = true;
+                textBox.ScrollBars = ScrollBars.Both;
+                textBox.WordWrap = false;
+                textBox.Dock = DockStyle.Fill;
+                textBox.Font = new Font("Consolas", 9f);
+
+                var buttonPanel = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 42,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(8, 6, 8, 6)
+                };
+
+                buttonOk.Text = "\u53D6\u8FBC\u307F";
+                buttonOk.Width = 88;
+                buttonOk.DialogResult = DialogResult.OK;
+
+                buttonCancel.Text = "\u30AD\u30E3\u30F3\u30BB\u30EB";
+                buttonCancel.Width = 88;
+                buttonCancel.DialogResult = DialogResult.Cancel;
+
+                buttonPanel.Controls.Add(buttonOk);
+                buttonPanel.Controls.Add(buttonCancel);
+
+                form.Controls.Add(textBox);
+                form.Controls.Add(buttonPanel);
+                form.Controls.Add(label);
+                form.AcceptButton = buttonOk;
+                form.CancelButton = buttonCancel;
+
+                if (form.ShowDialog(this) != DialogResult.OK)
+                {
+                    return false;
+                }
+
+                text = textBox.Text;
+                return true;
+            }
+        }
+
         private void CheckBoxShowTerrain_CheckedChanged(object sender, EventArgs e)
         {
             RefreshMiniMap();
