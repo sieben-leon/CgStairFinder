@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -555,6 +555,14 @@ namespace CgStairFinder
 
                     mapName = snapshot.MapName;
                     mapFile = snapshot.MapFile;
+                    if ((mapFile == null || !mapFile.Exists) && !string.IsNullOrWhiteSpace(latestMapPath))
+                    {
+                        var fallbackFile = new FileInfo(latestMapPath);
+                        if (fallbackFile.Exists)
+                        {
+                            mapFile = fallbackFile;
+                        }
+                    }
                     east = snapshot.East;
                     south = snapshot.South;
                 }
@@ -565,7 +573,29 @@ namespace CgStairFinder
 
                 if (mapFile == null || !mapFile.Exists)
                 {
-                    throw new Exception("\u30DE\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002");
+                    if (isSelectedWindow)
+                    {
+                        if (string.IsNullOrWhiteSpace(latestMapPath))
+                        {
+                            var initialFallback = CgClientReader.GetLatestMapFile(Settings.Default.cgDir);
+                            if (initialFallback != null && initialFallback.Exists)
+                            {
+                                mapFile = initialFallback;
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception("\u30DE\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002");
+                    }
                 }
 
                 var currentMapCode = mapFile.Name;
@@ -597,6 +627,7 @@ namespace CgStairFinder
                     logs[currentMapCode] = new DetectLog
                     {
                         MapCode = currentMapCode,
+                        MapRelativePath = GetRelativeMapPath(mapFile),
                         MapName = ChooseStoredMapName(mapName, existingLog),
                         CgStairs = cgStairs,
                         DetectTime = DateTime.Now
@@ -742,7 +773,8 @@ namespace CgStairFinder
             }
 
             List<DetectLog> selectedLogs;
-            if (!TrySelectShareLogs(candidates, out selectedLogs))
+            bool includeMapFiles;
+            if (!TrySelectShareLogs(candidates, out selectedLogs, out includeMapFiles))
             {
                 return;
             }
@@ -772,13 +804,27 @@ namespace CgStairFinder
 
                 try
                 {
-                    var count = HistoryShareService.ExportCompressed(dialog.FileName, selectedLogs);
+                    var exportResult = HistoryShareService.ExportCompressed(
+                        dialog.FileName,
+                        selectedLogs,
+                        includeMapFiles,
+                        TryLoadMapDatFile);
+
+                    var detail = string.Format(
+                        "共有データを出力しました。\n\n対象: {0} マップ\n{1}",
+                        exportResult.ExportedEntries,
+                        dialog.FileName);
+                    if (includeMapFiles)
+                    {
+                        detail += string.Format(
+                            "\n\n.dat 同梱: {0} 件\n.dat 未検出: {1} 件",
+                            exportResult.ExportedMapFiles,
+                            exportResult.MissingMapFiles);
+                    }
+
                     MessageBox.Show(
                         this,
-                        string.Format(
-                            "\u5171\u6709\u30C7\u30FC\u30BF\u3092\u51FA\u529B\u3057\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u30DE\u30C3\u30D7\n{1}",
-                            count,
-                            dialog.FileName),
+                        detail,
                         "\u30E1\u30C3\u30BB\u30FC\u30B8",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -799,8 +845,8 @@ namespace CgStairFinder
         {
             using (var dialog = new OpenFileDialog())
             {
-                dialog.Title = "\u5171\u6709\u30C7\u30FC\u30BF\u306E\u53D6\u8FBC";
-                dialog.Filter = "\u5171\u6709\u30D5\u30A1\u30A4\u30EB (*.cgshare;*.json)|*.cgshare;*.json|All files (*.*)|*.*";
+                dialog.Title = "共有データの取込";
+                dialog.Filter = "共有ファイル (*.cgshare;*.json)|*.cgshare;*.json|All files (*.*)|*.*";
                 dialog.CheckFileExists = true;
                 dialog.Multiselect = false;
                 if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -810,18 +856,67 @@ namespace CgStairFinder
 
                 try
                 {
-                    var result = HistoryShareService.ImportCompressed(dialog.FileName, sharedLogs);
+                    bool overwriteExistingMapFiles;
+                    if (!TryAskMapFileOverwriteOption(out overwriteExistingMapFiles))
+                    {
+                        return;
+                    }
+
+                    var wasRunning = timer1.Enabled;
+                    if (wasRunning)
+                    {
+                        timer1.Stop();
+                    }
+
+                    var currentMapPathBeforeImport = GetCurrentMapPathBeforeImport();
+                    HistoryShareService.ImportResult result;
+                    try
+                    {
+                        result = HistoryShareService.ImportCompressed(
+                            dialog.FileName,
+                            sharedLogs,
+                            GetMapDirectoryPath(),
+                            overwriteExistingMapFiles);
+                    }
+                    finally
+                    {
+                        if (wasRunning)
+                        {
+                            timer1.Start();
+                        }
+                    }
+
+                    var touchedCurrentMap = TryTouchMapFileTimestamp(currentMapPathBeforeImport);
                     RefreshStairListFromLatest();
+                    var detail = string.Format(
+                        "共有データを取込しました。\n\n対象: {0} 件\n追加: {1} 件\n更新: {2} 件\nスキップ: {3} 件\n無効: {4} 件",
+                        result.TotalEntries,
+                        result.Added,
+                        result.Updated,
+                        result.Skipped,
+                        result.Invalid);
+
+                    if (result.TotalMapFiles > 0)
+                    {
+                        detail += string.Format(
+                            "\n\n.dat 同梱: {0} 件\n.dat 新規配置: {1} 件\n.dat 上書き: {2} 件\n.dat 既存スキップ: {3} 件\n.dat 無効: {4} 件\n.dat 失敗: {5} 件",
+                            result.TotalMapFiles,
+                            result.ImportedMapFiles,
+                            result.OverwrittenMapFiles,
+                            result.SkippedMapFiles,
+                            result.InvalidMapFiles,
+                            result.FailedMapFiles);
+                    }
+
+                    if (touchedCurrentMap)
+                    {
+                        detail += "\n\n現在マップの .dat 更新日時を更新し、最新判定が切り替わらないようにしました。";
+                    }
+
                     MessageBox.Show(
                         this,
-                        string.Format(
-                            "\u5171\u6709\u30C7\u30FC\u30BF\u3092\u53D6\u8FBC\u307F\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u4EF6\n\u8FFD\u52A0: {1} \u4EF6\n\u66F4\u65B0: {2} \u4EF6\n\u30B9\u30AD\u30C3\u30D7: {3} \u4EF6\n\u7121\u52B9: {4} \u4EF6",
-                            result.TotalEntries,
-                            result.Added,
-                            result.Updated,
-                            result.Skipped,
-                            result.Invalid),
-                        "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                        detail,
+                        "メッセージ",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
                 }
@@ -829,8 +924,8 @@ namespace CgStairFinder
                 {
                     MessageBox.Show(
                         this,
-                        string.Format("\u53D6\u8FBC\u307F\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
-                        "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                        string.Format("取込に失敗しました。\n\n{0}", ex.Message),
+                        "メッセージ",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
                 }
@@ -861,13 +956,258 @@ namespace CgStairFinder
                 .ToList();
         }
 
-        private bool TrySelectShareLogs(IList<ShareLogItem> candidates, out List<DetectLog> selectedLogs)
+        private string GetMapDirectoryPath()
+        {
+            var cgDir = Settings.Default.cgDir;
+            if (string.IsNullOrWhiteSpace(cgDir))
+            {
+                return null;
+            }
+
+            try
+            {
+                return Path.Combine(cgDir, "map");
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return null;
+            }
+        }
+
+        private bool TryAskMapFileOverwriteOption(out bool overwriteExistingMapFiles)
+        {
+            overwriteExistingMapFiles = false;
+            var choice = MessageBox.Show(
+                this,
+                ".dat 同梱データを含む場合、既存の同名 .dat を上書きしますか？\n\nはい: 上書きする\nいいえ: 上書きしない\nキャンセル: 取込中止",
+                "取込オプション",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (choice == DialogResult.Cancel)
+            {
+                return false;
+            }
+
+            overwriteExistingMapFiles = choice == DialogResult.Yes;
+            return true;
+        }
+
+        private static string NormalizeRelativeMapPath(string relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return null;
+            }
+
+            var normalized = relativePath.Trim().Replace('/', '\\').TrimStart('\\');
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return null;
+            }
+
+            try
+            {
+                if (Path.IsPathRooted(normalized))
+                {
+                    return null;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException)
+            {
+                return null;
+            }
+
+            var parts = normalized.Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .ToArray();
+            if (parts.Length == 0 || parts.Any(x => x == "." || x == ".."))
+            {
+                return null;
+            }
+
+            if (parts.Any(x => x.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+            {
+                return null;
+            }
+
+            return string.Join("\\", parts);
+        }
+
+        private string GetRelativeMapPath(FileInfo mapFile)
+        {
+            if (mapFile == null)
+            {
+                return string.Empty;
+            }
+
+            var mapDir = GetMapDirectoryPath();
+            if (string.IsNullOrWhiteSpace(mapDir))
+            {
+                return mapFile.Name;
+            }
+
+            try
+            {
+                var root = Path.GetFullPath(mapDir).TrimEnd('\\') + "\\";
+                var full = Path.GetFullPath(mapFile.FullName);
+                if (full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                {
+                    return NormalizeRelativeMapPath(full.Substring(root.Length)) ?? mapFile.Name;
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+            }
+
+            return mapFile.Name;
+        }
+
+        private string GetCurrentMapPathBeforeImport()
+        {
+            if (!string.IsNullOrWhiteSpace(latestMapPath))
+            {
+                try
+                {
+                    if (File.Exists(latestMapPath))
+                    {
+                        return latestMapPath;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+                {
+                }
+            }
+
+            if (comboBox1.SelectedIndex > 0)
+            {
+                var process = comboBox1.SelectedItem as Process;
+                if (process != null && !process.HasExited)
+                {
+                    CgClientMapSnapshot snapshot;
+                    string errorMessage;
+                    if (CgClientReader.TryReadSnapshot(process, Settings.Default.cgDir, out snapshot, out errorMessage))
+                    {
+                        var mapFile = snapshot?.MapFile;
+                        if (mapFile != null)
+                        {
+                            try
+                            {
+                                if (mapFile.Exists)
+                                {
+                                    return mapFile.FullName;
+                                }
+                            }
+                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+                            {
+                            }
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private bool TryTouchMapFileTimestamp(string fullPath)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!File.Exists(fullPath))
+                {
+                    return false;
+                }
+
+                File.SetLastWriteTimeUtc(fullPath, DateTime.UtcNow);
+                return true;
+            }
+            catch (Exception ex) when (
+                ex is IOException ||
+                ex is UnauthorizedAccessException ||
+                ex is ArgumentException ||
+                ex is NotSupportedException ||
+                ex is PathTooLongException)
+            {
+                return false;
+            }
+        }
+
+        private HistoryShareService.MapFileExportItem TryLoadMapDatFile(DetectLog log)
+        {
+            if (log == null)
+            {
+                return null;
+            }
+
+            var mapDir = GetMapDirectoryPath();
+            if (string.IsNullOrWhiteSpace(mapDir) || !Directory.Exists(mapDir))
+            {
+                return null;
+            }
+
+            var relativePath = NormalizeRelativeMapPath(log.MapRelativePath);
+            if (!string.IsNullOrWhiteSpace(relativePath))
+            {
+                try
+                {
+                    var preferredPath = Path.Combine(mapDir, relativePath);
+                    if (File.Exists(preferredPath))
+                    {
+                        return new HistoryShareService.MapFileExportItem
+                        {
+                            RelativePath = relativePath,
+                            Data = File.ReadAllBytes(preferredPath)
+                        };
+                    }
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+                {
+                }
+            }
+
+            var fileName = NormalizeRelativeMapPath(log.MapCode);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return null;
+            }
+
+            try
+            {
+                var match = new DirectoryInfo(mapDir)
+                    .GetFiles(Path.GetFileName(fileName), SearchOption.AllDirectories)
+                    .OrderByDescending(x => x.LastWriteTime)
+                    .FirstOrDefault();
+                if (match == null || !match.Exists)
+                {
+                    return null;
+                }
+
+                return new HistoryShareService.MapFileExportItem
+                {
+                    RelativePath = GetRelativeMapPath(match),
+                    Data = File.ReadAllBytes(match.FullName)
+                };
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return null;
+            }
+        }
+
+        private bool TrySelectShareLogs(IList<ShareLogItem> candidates, out List<DetectLog> selectedLogs, out bool includeMapFiles)
         {
             selectedLogs = new List<DetectLog>();
+            includeMapFiles = false;
 
             using (var form = new Form())
             using (var label = new Label())
             using (var checkedList = new CheckedListBox())
+            using (var checkIncludeMapFiles = new CheckBox())
             using (var buttonOk = new Button())
             using (var buttonCancel = new Button())
             {
@@ -895,6 +1235,12 @@ namespace CgStairFinder
                     checkedList.Items.Add(candidates[i], true);
                 }
 
+                checkIncludeMapFiles.AutoSize = true;
+                checkIncludeMapFiles.Dock = DockStyle.Bottom;
+                checkIncludeMapFiles.Padding = new Padding(8, 4, 8, 2);
+                checkIncludeMapFiles.Text = "選択したマップの .dat も同梱する（ファイルサイズ増）";
+                checkIncludeMapFiles.Checked = false;
+
                 var buttonPanel = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Bottom,
@@ -915,6 +1261,7 @@ namespace CgStairFinder
                 buttonPanel.Controls.Add(buttonCancel);
 
                 form.Controls.Add(checkedList);
+                form.Controls.Add(checkIncludeMapFiles);
                 form.Controls.Add(buttonPanel);
                 form.Controls.Add(label);
                 form.AcceptButton = buttonOk;
@@ -929,6 +1276,7 @@ namespace CgStairFinder
                     .Cast<ShareLogItem>()
                     .Select(x => x.Log)
                     .ToList();
+                includeMapFiles = checkIncludeMapFiles.Checked;
                 return true;
             }
         }

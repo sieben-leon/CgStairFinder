@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -11,7 +11,7 @@ namespace CgStairFinder
 {
     internal static class HistoryShareService
     {
-        private const int CurrentSchemaVersion = 1;
+        private const int CurrentSchemaVersion = 2;
 
         [DataContract]
         private sealed class SharedHistoryFile
@@ -24,6 +24,9 @@ namespace CgStairFinder
 
             [DataMember(Name = "entries")]
             public List<SharedHistoryEntry> Entries { get; set; }
+
+            [DataMember(Name = "mapFiles", EmitDefaultValue = false)]
+            public List<SharedMapFile> MapFiles { get; set; }
         }
 
         [DataContract]
@@ -31,6 +34,9 @@ namespace CgStairFinder
         {
             [DataMember(Name = "mapCode")]
             public string MapCode { get; set; }
+
+            [DataMember(Name = "mapRelativePath", EmitDefaultValue = false)]
+            public string MapRelativePath { get; set; }
 
             [DataMember(Name = "mapName")]
             public string MapName { get; set; }
@@ -55,6 +61,32 @@ namespace CgStairFinder
             public int Type { get; set; }
         }
 
+        [DataContract]
+        private sealed class SharedMapFile
+        {
+            [DataMember(Name = "mapCode")]
+            public string MapCode { get; set; }
+
+            [DataMember(Name = "relativePath", EmitDefaultValue = false)]
+            public string RelativePath { get; set; }
+
+            [DataMember(Name = "data")]
+            public byte[] Data { get; set; }
+        }
+
+        internal sealed class MapFileExportItem
+        {
+            public string RelativePath { get; set; }
+            public byte[] Data { get; set; }
+        }
+
+        internal sealed class ExportResult
+        {
+            public int ExportedEntries { get; set; }
+            public int ExportedMapFiles { get; set; }
+            public int MissingMapFiles { get; set; }
+        }
+
         internal sealed class ImportResult
         {
             public int Added { get; set; }
@@ -62,6 +94,13 @@ namespace CgStairFinder
             public int Skipped { get; set; }
             public int Invalid { get; set; }
             public int TotalEntries { get; set; }
+
+            public int TotalMapFiles { get; set; }
+            public int ImportedMapFiles { get; set; }
+            public int OverwrittenMapFiles { get; set; }
+            public int SkippedMapFiles { get; set; }
+            public int InvalidMapFiles { get; set; }
+            public int FailedMapFiles { get; set; }
         }
 
         public static string ExportToJson(IEnumerable<DetectLog> logs)
@@ -80,7 +119,17 @@ namespace CgStairFinder
 
         public static int ExportCompressed(string outputPath, IEnumerable<DetectLog> logs)
         {
-            var payload = BuildPayload(logs);
+            return ExportCompressed(outputPath, logs, false, null).ExportedEntries;
+        }
+
+        public static ExportResult ExportCompressed(
+            string outputPath,
+            IEnumerable<DetectLog> logs,
+            bool includeMapFiles,
+            Func<DetectLog, MapFileExportItem> mapFileLoader)
+        {
+            int missingMapFiles;
+            var payload = BuildPayload(logs, includeMapFiles, mapFileLoader, out missingMapFiles);
             var json = ExportPayloadToJson(payload);
             var bytes = Encoding.UTF8.GetBytes(json);
 
@@ -90,7 +139,12 @@ namespace CgStairFinder
                 gzip.Write(bytes, 0, bytes.Length);
             }
 
-            return payload.Entries.Count;
+            return new ExportResult
+            {
+                ExportedEntries = payload.Entries.Count,
+                ExportedMapFiles = payload.MapFiles?.Count ?? 0,
+                MissingMapFiles = missingMapFiles
+            };
         }
 
         public static ImportResult ImportFromJson(string json, IDictionary<string, DetectLog> targetLogs)
@@ -100,13 +154,7 @@ namespace CgStairFinder
                 return new ImportResult();
             }
 
-            var serializer = new DataContractJsonSerializer(typeof(SharedHistoryFile));
-            SharedHistoryFile payload;
-            using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(json)))
-            {
-                payload = serializer.ReadObject(ms) as SharedHistoryFile;
-            }
-
+            var payload = DeserializePayload(json);
             return MergePayload(payload, targetLogs);
         }
 
@@ -118,6 +166,20 @@ namespace CgStairFinder
 
         public static ImportResult ImportCompressed(string inputPath, IDictionary<string, DetectLog> targetLogs)
         {
+            return ImportCompressed(inputPath, targetLogs, null);
+        }
+
+        public static ImportResult ImportCompressed(string inputPath, IDictionary<string, DetectLog> targetLogs, string mapDirectory)
+        {
+            return ImportCompressed(inputPath, targetLogs, mapDirectory, false);
+        }
+
+        public static ImportResult ImportCompressed(
+            string inputPath,
+            IDictionary<string, DetectLog> targetLogs,
+            string mapDirectory,
+            bool overwriteExistingMapFiles)
+        {
             byte[] compressed;
             using (var fs = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
@@ -125,6 +187,7 @@ namespace CgStairFinder
                 fs.Read(compressed, 0, compressed.Length);
             }
 
+            string json;
             try
             {
                 using (var input = new MemoryStream(compressed))
@@ -132,31 +195,94 @@ namespace CgStairFinder
                 using (var output = new MemoryStream())
                 {
                     gzip.CopyTo(output);
-                    var json = Encoding.UTF8.GetString(output.ToArray());
-                    return ImportFromJson(json, targetLogs);
+                    json = Encoding.UTF8.GetString(output.ToArray());
                 }
             }
             catch (InvalidDataException)
             {
                 // 旧フォーマット(JSON生ファイル)も取り込めるようにしておく
-                var json = Encoding.UTF8.GetString(compressed);
-                return ImportFromJson(json, targetLogs);
+                json = Encoding.UTF8.GetString(compressed);
             }
+
+            var payload = DeserializePayload(json);
+            var result = MergePayload(payload, targetLogs);
+            MergeMapFiles(payload, mapDirectory, overwriteExistingMapFiles, result);
+            return result;
         }
 
         private static SharedHistoryFile BuildPayload(IEnumerable<DetectLog> logs)
         {
+            int unused;
+            return BuildPayload(logs, false, null, out unused);
+        }
+
+        private static SharedHistoryFile BuildPayload(
+            IEnumerable<DetectLog> logs,
+            bool includeMapFiles,
+            Func<DetectLog, MapFileExportItem> mapFileLoader,
+            out int missingMapFiles)
+        {
+            missingMapFiles = 0;
             var validLogs = (logs ?? Enumerable.Empty<DetectLog>())
                 .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
                 .OrderBy(x => x.DetectTime)
                 .ToList();
 
+            List<SharedMapFile> mapFiles = null;
+            if (includeMapFiles && mapFileLoader != null)
+            {
+                mapFiles = new List<SharedMapFile>();
+                foreach (var log in validLogs
+                    .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.OrderByDescending(x => x.DetectTime).First()))
+                {
+                    var loaded = mapFileLoader(log);
+                    if (loaded?.Data == null || loaded.Data.Length == 0)
+                    {
+                        missingMapFiles++;
+                        continue;
+                    }
+
+                    var relativePath = NormalizeRelativePath(loaded.RelativePath);
+                    if (string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        relativePath = NormalizeRelativePath(log.MapRelativePath);
+                    }
+                    if (string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        relativePath = NormalizeRelativePath(log.MapCode);
+                    }
+
+                    mapFiles.Add(new SharedMapFile
+                    {
+                        MapCode = log.MapCode,
+                        RelativePath = relativePath,
+                        Data = loaded.Data
+                    });
+                }
+            }
+
             return new SharedHistoryFile
             {
                 SchemaVersion = CurrentSchemaVersion,
                 ExportedAt = DateTime.Now,
-                Entries = validLogs.Select(ToSharedEntry).ToList()
+                Entries = validLogs.Select(ToSharedEntry).ToList(),
+                MapFiles = mapFiles != null && mapFiles.Count > 0 ? mapFiles : null
             };
+        }
+
+        private static SharedHistoryFile DeserializePayload(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            var serializer = new DataContractJsonSerializer(typeof(SharedHistoryFile));
+            using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            {
+                return serializer.ReadObject(ms) as SharedHistoryFile;
+            }
         }
 
         private static string ExportPayloadToJson(SharedHistoryFile payload)
@@ -210,11 +336,174 @@ namespace CgStairFinder
             return result;
         }
 
+        private static void MergeMapFiles(
+            SharedHistoryFile payload,
+            string mapDirectory,
+            bool overwriteExistingMapFiles,
+            ImportResult result)
+        {
+            if (result == null || payload?.MapFiles == null || payload.MapFiles.Count == 0)
+            {
+                return;
+            }
+
+            result.TotalMapFiles = payload.MapFiles.Count;
+            if (string.IsNullOrWhiteSpace(mapDirectory))
+            {
+                result.SkippedMapFiles = payload.MapFiles.Count;
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(mapDirectory);
+            }
+            catch
+            {
+                result.FailedMapFiles += payload.MapFiles.Count;
+                return;
+            }
+
+            foreach (var mapFile in payload.MapFiles)
+            {
+                if (mapFile == null || string.IsNullOrWhiteSpace(mapFile.MapCode) || mapFile.Data == null || mapFile.Data.Length == 0)
+                {
+                    result.InvalidMapFiles++;
+                    continue;
+                }
+
+                var relativePath = NormalizeRelativePath(mapFile.RelativePath);
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    relativePath = NormalizeRelativePath(mapFile.MapCode);
+                }
+
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    result.InvalidMapFiles++;
+                    continue;
+                }
+
+                string outputPath;
+                if (!TryBuildSafeOutputPath(mapDirectory, relativePath, out outputPath))
+                {
+                    result.InvalidMapFiles++;
+                    continue;
+                }
+
+                try
+                {
+                    var outputDir = Path.GetDirectoryName(outputPath);
+                    if (!string.IsNullOrWhiteSpace(outputDir))
+                    {
+                        Directory.CreateDirectory(outputDir);
+                    }
+
+                    if (File.Exists(outputPath))
+                    {
+                        if (!overwriteExistingMapFiles)
+                        {
+                            result.SkippedMapFiles++;
+                            continue;
+                        }
+
+                        File.WriteAllBytes(outputPath, mapFile.Data);
+                        result.OverwrittenMapFiles++;
+                        continue;
+                    }
+
+                    File.WriteAllBytes(outputPath, mapFile.Data);
+                    result.ImportedMapFiles++;
+                }
+                catch
+                {
+                    result.FailedMapFiles++;
+                }
+            }
+        }
+
+        private static bool TryBuildSafeOutputPath(string mapDirectory, string relativePath, out string outputPath)
+        {
+            outputPath = null;
+            if (string.IsNullOrWhiteSpace(mapDirectory) || string.IsNullOrWhiteSpace(relativePath))
+            {
+                return false;
+            }
+
+            string rootFull;
+            string candidateFull;
+            try
+            {
+                rootFull = Path.GetFullPath(mapDirectory).TrimEnd('\\') + "\\";
+                candidateFull = Path.GetFullPath(Path.Combine(mapDirectory, relativePath));
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return false;
+            }
+
+            if (!candidateFull.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            outputPath = candidateFull;
+            return true;
+        }
+
+        private static string NormalizeRelativePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            var normalized = path.Trim().Replace('/', '\\').TrimStart('\\');
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return null;
+            }
+
+            try
+            {
+                if (Path.IsPathRooted(normalized))
+                {
+                    return null;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException)
+            {
+                return null;
+            }
+
+            var segments = normalized
+                .Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .ToArray();
+            if (segments.Length == 0)
+            {
+                return null;
+            }
+
+            if (segments.Any(x => x == "." || x == ".."))
+            {
+                return null;
+            }
+
+            if (segments.Any(x => x.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+            {
+                return null;
+            }
+
+            return string.Join("\\", segments);
+        }
+
         private static SharedHistoryEntry ToSharedEntry(DetectLog log)
         {
             return new SharedHistoryEntry
             {
                 MapCode = log.MapCode,
+                MapRelativePath = log.MapRelativePath,
                 MapName = log.MapName,
                 DetectTime = log.DetectTime,
                 Stairs = (log.CgStairs ?? new List<CgStair>()).Select(stair => new SharedStair
@@ -250,6 +539,7 @@ namespace CgStairFinder
             return new DetectLog
             {
                 MapCode = entry.MapCode,
+                MapRelativePath = entry.MapRelativePath ?? string.Empty,
                 MapName = entry.MapName ?? string.Empty,
                 DetectTime = entry.DetectTime == default(DateTime) ? DateTime.MinValue : entry.DetectTime,
                 CgStairs = stairs
