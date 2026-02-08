@@ -19,6 +19,7 @@ namespace CgStairFinder
         private static extern int ShowWindow(IntPtr hwnd, int nCmdShow);
 
         private static readonly IDictionary<string, DetectLog> logs = new Dictionary<string, DetectLog>();
+        private static readonly IDictionary<string, DetectLog> sharedLogs = new Dictionary<string, DetectLog>();
 
         private const float MiniMapZoomMin = 1f;
         private const float MiniMapZoomMax = 8f;
@@ -395,6 +396,67 @@ namespace CgStairFinder
             return "\u2190";
         }
 
+        private void PopulateStairList(
+            string mapCode,
+            bool isSelectedWindow,
+            int? east,
+            int? south,
+            IList<CgStair> localStairs)
+        {
+            listBox1.Items.Clear();
+
+            foreach (var stair in localStairs ?? Enumerable.Empty<CgStair>())
+            {
+                listBox1.Items.Add(BuildStairListText(stair, isSelectedWindow, east, south, false));
+            }
+
+            DetectLog sharedLog;
+            if (!string.IsNullOrWhiteSpace(mapCode) && sharedLogs.TryGetValue(mapCode, out sharedLog))
+            {
+                foreach (var stair in sharedLog.CgStairs ?? Enumerable.Empty<CgStair>())
+                {
+                    listBox1.Items.Add(BuildStairListText(stair, isSelectedWindow, east, south, true));
+                }
+            }
+
+            if (listBox1.Items.Count == 0)
+            {
+                listBox1.Items.Add("\u968E\u6BB5\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
+            }
+        }
+
+        private static string BuildStairListText(CgStair stair, bool isSelectedWindow, int? east, int? south, bool isShared)
+        {
+            var prefix = isShared ? "\uFF0A" : string.Empty;
+            var type = CgStair.Translate(stair.Type);
+            if (!isSelectedWindow)
+            {
+                return string.Format("{0}\u6771{1}\u3001\u5357{2} -- {3}", prefix, stair.East, stair.South, type);
+            }
+
+            var direction = string.Empty;
+            if (east.HasValue && south.HasValue)
+            {
+                direction = GetDirection(east.Value, south.Value, stair);
+            }
+
+            return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}", prefix, stair.East, stair.South, direction, type);
+        }
+
+        private void RefreshStairListFromLatest()
+        {
+            if (latestMapData == null && string.IsNullOrWhiteSpace(latestMapPath))
+            {
+                listBox1.Items.Clear();
+                return;
+            }
+
+            var mapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
+            var localStairs = latestMapData?.Stairs ?? (IList<CgStair>)new List<CgStair>();
+            var isSelectedWindow = comboBox1.SelectedIndex > 0;
+            PopulateStairList(mapCode, isSelectedWindow, latestEast, latestSouth, localStairs);
+        }
+
         private void Timer1_Tick(object sender, EventArgs e)
         {
             timer1.Interval = 500;
@@ -440,7 +502,6 @@ namespace CgStairFinder
                 Text = string.IsNullOrWhiteSpace(mapName) ? mapFile.Name : mapName;
                 SetMapPathLabel(mapFile.FullName);
 
-                listBox1.Items.Clear();
                 var mapData = new CgMapStairFinder(mapFile).GetMapData();
                 var currentMapPath = mapFile.FullName;
                 if (!string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase))
@@ -455,37 +516,18 @@ namespace CgStairFinder
                 RefreshMiniMap();
 
                 var cgStairs = mapData.Stairs;
-                if (cgStairs.Count == 0)
+                if (cgStairs.Count > 0)
                 {
-                    listBox1.Items.Add("\u968E\u6BB5\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
-                    return;
+                    logs[mapFile.Name] = new DetectLog
+                    {
+                        MapCode = mapFile.Name,
+                        MapName = mapName,
+                        CgStairs = cgStairs,
+                        DetectTime = DateTime.Now
+                    };
                 }
 
-                logs[mapFile.Name] = new DetectLog
-                {
-                    MapCode = mapFile.Name,
-                    MapName = mapName,
-                    CgStairs = cgStairs,
-                    DetectTime = DateTime.Now
-                };
-
-                foreach (var stair in cgStairs)
-                {
-                    var type = CgStair.Translate(stair.Type);
-                    if (!isSelectedWindow)
-                    {
-                        listBox1.Items.Add(string.Format("\u6771{0}\u3001\u5357{1} -- {2}", stair.East, stair.South, type));
-                        continue;
-                    }
-
-                    var direction = string.Empty;
-                    if (east.HasValue && south.HasValue)
-                    {
-                        direction = GetDirection(east.Value, south.Value, stair);
-                    }
-
-                    listBox1.Items.Add(string.Format("\u6771{0}\u3001\u5357{1} {2} -- {3}", stair.East, stair.South, direction, type));
-                }
+                PopulateStairList(mapFile.Name, isSelectedWindow, east, south, cgStairs);
             }
             catch (IOException)
             {
@@ -616,7 +658,14 @@ namespace CgStairFinder
 
         private void Button5_Click(object sender, EventArgs e)
         {
-            if (!logs.Any())
+            var exportLogs = logs.Values
+                .Concat(sharedLogs.Values)
+                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
+                .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(x => x.DetectTime).First())
+                .ToList();
+
+            if (!exportLogs.Any())
             {
                 MessageBox.Show("\u8A18\u9332\u304C\u3042\u308A\u307E\u305B\u3093\u3002", "\u30E1\u30C3\u30BB\u30FC\u30B8", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -624,11 +673,11 @@ namespace CgStairFinder
 
             try
             {
-                var json = HistoryShareService.ExportToJson(logs.Values);
+                var json = HistoryShareService.ExportToJson(exportLogs);
                 Clipboard.SetText(json);
                 MessageBox.Show(
                     this,
-                    string.Format("\u5C65\u6B74\u60C5\u5831\u3092\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u30DE\u30C3\u30D7", logs.Count),
+                    string.Format("\u5C65\u6B74\u60C5\u5831\u3092\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u30DE\u30C3\u30D7", exportLogs.Count),
                     "\u30E1\u30C3\u30BB\u30FC\u30B8",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -665,11 +714,12 @@ namespace CgStairFinder
 
             try
             {
-                var result = HistoryShareService.ImportFromJson(text, logs);
+                var result = HistoryShareService.ImportFromJson(text, sharedLogs);
+                RefreshStairListFromLatest();
                 MessageBox.Show(
                     this,
                     string.Format(
-                        "\u8CBC\u4ED8\u30C6\u30AD\u30B9\u30C8\u304B\u3089\u53D6\u8FBC\u307F\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u4EF6\n\u8FFD\u52A0: {1} \u4EF6\n\u66F4\u65B0: {2} \u4EF6\n\u30B9\u30AD\u30C3\u30D7: {3} \u4EF6\n\u7121\u52B9: {4} \u4EF6",
+                        "\u5171\u6709\u30C7\u30FC\u30BF\u3092\u53D6\u8FBC\u307F\u307E\u3057\u305F\u3002\n\n\u5BFE\u8C61: {0} \u4EF6\n\u8FFD\u52A0: {1} \u4EF6\n\u66F4\u65B0: {2} \u4EF6\n\u30B9\u30AD\u30C3\u30D7: {3} \u4EF6\n\u7121\u52B9: {4} \u4EF6",
                         result.TotalEntries,
                         result.Added,
                         result.Updated,
@@ -755,6 +805,30 @@ namespace CgStairFinder
                 text = textBox.Text;
                 return true;
             }
+        }
+
+        private void Button7_Click(object sender, EventArgs e)
+        {
+            if (!sharedLogs.Any())
+            {
+                MessageBox.Show(
+                    this,
+                    "\u5171\u6709\u30C7\u30FC\u30BF\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var deleted = sharedLogs.Count;
+            sharedLogs.Clear();
+            RefreshStairListFromLatest();
+            MessageBox.Show(
+                this,
+                string.Format("\u5171\u6709\u30C7\u30FC\u30BF\u3092\u524A\u9664\u3057\u307E\u3057\u305F\u3002\n\n{0} \u30DE\u30C3\u30D7", deleted),
+                "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         private void CheckBoxShowTerrain_CheckedChanged(object sender, EventArgs e)
