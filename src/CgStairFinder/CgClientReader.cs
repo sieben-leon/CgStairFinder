@@ -263,18 +263,78 @@ namespace CgStairFinder
 
         private static string DecodeMapPath(byte[] buffer)
         {
-            var bytes = ReadNullTerminatedBytes(buffer);
+            if (buffer == null || buffer.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            // On some client builds, the 4 bytes at 0x18CCC8 are metadata and the path starts at +4.
+            var offsetCandidate = DecodePathCandidate(buffer, 4);
+            if (LooksLikeMapPath(offsetCandidate))
+            {
+                return offsetCandidate;
+            }
+
+            // Keep backward compatibility with the old layout.
+            var baseCandidate = DecodePathCandidate(buffer, 0);
+            if (LooksLikeMapPath(baseCandidate))
+            {
+                return baseCandidate;
+            }
+
+            return offsetCandidate.Length >= baseCandidate.Length ? offsetCandidate : baseCandidate;
+        }
+
+        private static string DecodePathCandidate(byte[] buffer, int startIndex)
+        {
+            var bytes = ReadNullTerminatedBytes(buffer, startIndex);
             if (bytes.Length == 0)
             {
                 return string.Empty;
             }
 
-            return Encoding.Default.GetString(bytes).Trim();
+            return NormalizePath(Encoding.Default.GetString(bytes));
+        }
+
+        private static bool LooksLikeMapPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            var normalized = NormalizePath(path);
+            return normalized.IndexOf(".dat", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   (normalized.StartsWith("map\\", StringComparison.OrdinalIgnoreCase) ||
+                    normalized.Contains("\\"));
         }
 
         private static byte[] ReadNullTerminatedBytes(byte[] buffer)
         {
-            return buffer.TakeWhile(x => x != 0).ToArray();
+            return ReadNullTerminatedBytes(buffer, 0);
+        }
+
+        private static byte[] ReadNullTerminatedBytes(byte[] buffer, int startIndex)
+        {
+            if (buffer == null || buffer.Length == 0 || startIndex < 0 || startIndex >= buffer.Length)
+            {
+                return Array.Empty<byte>();
+            }
+
+            var count = 0;
+            for (var i = startIndex; i < buffer.Length && buffer[i] != 0; i++)
+            {
+                count++;
+            }
+
+            if (count == 0)
+            {
+                return Array.Empty<byte>();
+            }
+
+            var bytes = new byte[count];
+            Buffer.BlockCopy(buffer, startIndex, bytes, 0, count);
+            return bytes;
         }
 
         private static string NormalizePath(string path)
