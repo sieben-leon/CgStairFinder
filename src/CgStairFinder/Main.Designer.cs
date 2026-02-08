@@ -84,7 +84,7 @@
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(420, 365);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(420, 390);
             this.tableLayoutPanel2.TabIndex = 14;
             // listBox1
             // 
@@ -93,6 +93,7 @@
             this.listBox1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.listBox1.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
             this.listBox1.FormattingEnabled = true;
+            this.listBox1.IntegralHeight = false;
             this.listBox1.ItemHeight = 22;
             this.listBox1.Location = new System.Drawing.Point(15, 96);
             this.listBox1.Margin = new System.Windows.Forms.Padding(3, 3, 8, 3);
@@ -104,11 +105,13 @@
             // pictureBoxMap
             // 
             this.pictureBoxMap.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(249)))), ((int)(((byte)(251)))), ((int)(((byte)(255)))));
+            this.pictureBoxMap.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)));
             this.pictureBoxMap.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.pictureBoxMap.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.pictureBoxMap.Dock = System.Windows.Forms.DockStyle.None;
             this.pictureBoxMap.Location = new System.Drawing.Point(240, 96);
+            this.pictureBoxMap.Margin = new System.Windows.Forms.Padding(3, 3, 3, 10);
             this.pictureBoxMap.Name = "pictureBoxMap";
-            this.pictureBoxMap.Size = new System.Drawing.Size(89, 183);
+            this.pictureBoxMap.Size = new System.Drawing.Size(150, 150);
             this.pictureBoxMap.TabIndex = 16;
             this.pictureBoxMap.TabStop = false;
             // 
@@ -252,14 +255,14 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(240)))), ((int)(((byte)(245)))), ((int)(((byte)(252)))));
-            this.ClientSize = new System.Drawing.Size(420, 365);
+            this.ClientSize = new System.Drawing.Size(420, 390);
             this.Controls.Add(this.tableLayoutPanel2);
             this.Font = new System.Drawing.Font("Meiryo UI", 9.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(4);
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.MinimumSize = new System.Drawing.Size(436, 404);
+            this.MinimumSize = new System.Drawing.Size(436, 430);
             this.Name = "Main";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Cg Stair Finder";
@@ -291,3 +294,4 @@
         private System.Windows.Forms.PictureBox pictureBoxMap;
     }
 }
+

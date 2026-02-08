@@ -15,13 +15,18 @@ namespace CgStairFinder
             Blocked = 4
         }
 
+        private static string cachedTerrainKey;
+        private static Bitmap cachedTerrainBitmap;
+
         public static Bitmap Render(
             Size canvasSize,
             CgMapStairFinder.CgMapData mapData,
             int? east,
             int? south,
             bool showTerrain,
+            bool freezeTerrainLayer,
             float zoom,
+            string mapCacheKey,
             float panOffsetX,
             float panOffsetY)
         {
@@ -38,15 +43,37 @@ namespace CgStairFinder
                 g.Clear(Color.FromArgb(248, 250, 252));
 
                 const float padding = 8f;
-                var bounds = new RectangleF(padding, padding, bitmap.Width - padding * 2, bitmap.Height - padding * 2);
+                var usableWidth = Math.Max(1f, bitmap.Width - padding * 2);
+                var usableHeight = Math.Max(1f, bitmap.Height - padding * 2);
+                var squareSide = Math.Max(1f, Math.Min(usableWidth, usableHeight));
+                var bounds = new RectangleF(
+                    (bitmap.Width - squareSide) / 2f,
+                    (bitmap.Height - squareSide) / 2f,
+                    squareSide,
+                    squareSide);
                 var fitRect = FitRectangle(bounds, mapData.Width, mapData.Height);
                 var mapRect = ApplyZoom(fitRect, bounds, zoom, mapData.Width, mapData.Height, east, south, panOffsetX, panOffsetY);
 
                 var clipState = g.Save();
                 g.SetClip(bounds);
+
                 if (showTerrain)
                 {
-                    DrawMiniMapCells(g, mapRect, mapData);
+                    var renderWidth = Math.Max(1, (int)Math.Round(mapRect.Width));
+                    var renderHeight = Math.Max(1, (int)Math.Round(mapRect.Height));
+                    Bitmap terrain;
+                    if (freezeTerrainLayer)
+                    {
+                        terrain = GetTerrainLayer(mapData, renderWidth, renderHeight, mapCacheKey);
+                    }
+                    else
+                    {
+                        InvalidateTerrainCache();
+                        terrain = BuildTerrainLayer(mapData, renderWidth, renderHeight);
+                    }
+                    g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    g.DrawImage(terrain, mapRect.X, mapRect.Y, mapRect.Width, mapRect.Height);
                 }
                 else
                 {
@@ -82,10 +109,109 @@ namespace CgStairFinder
                         g.DrawEllipse(markerPen, player.X - 4f, player.Y - 4f, 8f, 8f);
                     }
                 }
+
                 g.Restore(clipState);
             }
 
             return bitmap;
+        }
+
+        private static Bitmap GetTerrainLayer(CgMapStairFinder.CgMapData mapData, int renderWidth, int renderHeight, string mapCacheKey)
+        {
+            var key = string.Format(
+                "{0}|{1}x{2}|{3}x{4}",
+                mapCacheKey ?? string.Empty,
+                mapData.Width,
+                mapData.Height,
+                renderWidth,
+                renderHeight);
+
+            if (cachedTerrainBitmap != null && string.Equals(cachedTerrainKey, key, StringComparison.Ordinal))
+            {
+                return cachedTerrainBitmap;
+            }
+
+            cachedTerrainBitmap?.Dispose();
+            cachedTerrainBitmap = BuildTerrainLayer(mapData, renderWidth, renderHeight);
+            cachedTerrainKey = key;
+            return cachedTerrainBitmap;
+        }
+
+        private static void InvalidateTerrainCache()
+        {
+            if (cachedTerrainBitmap != null)
+            {
+                cachedTerrainBitmap.Dispose();
+                cachedTerrainBitmap = null;
+            }
+
+            cachedTerrainKey = null;
+        }
+
+        private static Bitmap BuildTerrainLayer(CgMapStairFinder.CgMapData mapData, int renderWidth, int renderHeight)
+        {
+            var cellCount = mapData.Width * mapData.Height;
+            var layer = new Bitmap(renderWidth, renderHeight);
+
+            if (mapData.Flags == null || mapData.Flags.Length != cellCount)
+            {
+                using (var g = Graphics.FromImage(layer))
+                using (var brush = new SolidBrush(Color.FromArgb(226, 232, 240)))
+                {
+                    g.FillRectangle(brush, 0, 0, renderWidth, renderHeight);
+                }
+                return layer;
+            }
+
+            var hasObjectIds = mapData.ObjectIds != null && mapData.ObjectIds.Length == cellCount;
+            for (var y = 0; y < renderHeight; y++)
+            {
+                var southStart = y * mapData.Height / renderHeight;
+                var southEndExclusive = (y + 1) * mapData.Height / renderHeight;
+                if (southEndExclusive <= southStart)
+                {
+                    southEndExclusive = southStart + 1;
+                }
+
+                for (var x = 0; x < renderWidth; x++)
+                {
+                    var eastStart = x * mapData.Width / renderWidth;
+                    var eastEndExclusive = (x + 1) * mapData.Width / renderWidth;
+                    if (eastEndExclusive <= eastStart)
+                    {
+                        eastEndExclusive = eastStart + 1;
+                    }
+
+                    var kind = MiniMapCellKind.NoMap;
+                    for (var south = southStart; south < southEndExclusive; south++)
+                    {
+                        var row = south * mapData.Width;
+                        for (var east = eastStart; east < eastEndExclusive; east++)
+                        {
+                            var idx = row + east;
+                            var objectId = hasObjectIds ? mapData.ObjectIds[idx] : (ushort)0;
+                            var candidate = GetCellKind(mapData.Flags[idx], objectId);
+                            if (candidate > kind)
+                            {
+                                kind = candidate;
+                                if (kind == MiniMapCellKind.Blocked)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (kind == MiniMapCellKind.Blocked)
+                        {
+                            break;
+                        }
+                    }
+
+                    layer.SetPixel(x, y, GetCellColor(kind));
+                }
+            }
+
+            return layer;
         }
 
         private static RectangleF ApplyZoom(
@@ -107,7 +233,6 @@ namespace CgStairFinder
 
             var width = fitRect.Width * clampedZoom;
             var height = fitRect.Height * clampedZoom;
-
             var centerX = fitRect.Left + fitRect.Width / 2f;
             var centerY = fitRect.Top + fitRect.Height / 2f;
 
@@ -174,76 +299,6 @@ namespace CgStairFinder
             }
         }
 
-        private static void DrawMiniMapCells(Graphics g, RectangleF mapRect, CgMapStairFinder.CgMapData mapData)
-        {
-            var cellCount = mapData.Width * mapData.Height;
-            if (mapData.Flags == null || mapData.Flags.Length != cellCount)
-            {
-                using (var brush = new SolidBrush(Color.FromArgb(226, 232, 240)))
-                {
-                    g.FillRectangle(brush, mapRect);
-                }
-                return;
-            }
-
-            var hasObjectIds = mapData.ObjectIds != null && mapData.ObjectIds.Length == cellCount;
-            var renderWidth = Math.Max(1, (int)Math.Round(mapRect.Width));
-            var renderHeight = Math.Max(1, (int)Math.Round(mapRect.Height));
-            using (var layer = new Bitmap(renderWidth, renderHeight))
-            {
-                for (var y = 0; y < renderHeight; y++)
-                {
-                    var southStart = y * mapData.Height / renderHeight;
-                    var southEndExclusive = (y + 1) * mapData.Height / renderHeight;
-                    if (southEndExclusive <= southStart)
-                    {
-                        southEndExclusive = southStart + 1;
-                    }
-
-                    for (var x = 0; x < renderWidth; x++)
-                    {
-                        var eastStart = x * mapData.Width / renderWidth;
-                        var eastEndExclusive = (x + 1) * mapData.Width / renderWidth;
-                        if (eastEndExclusive <= eastStart)
-                        {
-                            eastEndExclusive = eastStart + 1;
-                        }
-
-                        var kind = MiniMapCellKind.NoMap;
-                        for (var south = southStart; south < southEndExclusive; south++)
-                        {
-                            var row = south * mapData.Width;
-                            for (var east = eastStart; east < eastEndExclusive; east++)
-                            {
-                                var idx = row + east;
-                                var objectId = hasObjectIds ? mapData.ObjectIds[idx] : (ushort)0;
-                                var candidate = GetCellKind(mapData.Flags[idx], objectId);
-                                if (candidate > kind)
-                                {
-                                    kind = candidate;
-                                    if (kind == MiniMapCellKind.Blocked)
-                                    {
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if (kind == MiniMapCellKind.Blocked)
-                            {
-                                break;
-                            }
-                        }
-
-                        layer.SetPixel(x, y, GetCellColor(kind));
-                    }
-                }
-
-                g.InterpolationMode = InterpolationMode.NearestNeighbor;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.DrawImage(layer, mapRect);
-            }
-        }
-
         private static MiniMapCellKind GetCellKind(ushort flag, ushort objectId)
         {
             if (flag == 0)
@@ -265,7 +320,6 @@ namespace CgStairFinder
                 return MiniMapCellKind.Transition;
             }
 
-            // このクライアントでは通行不可が 193 でなく objectId 側に出るマップがある。
             if (objectId != 0)
             {
                 return MiniMapCellKind.Blocked;

@@ -59,14 +59,14 @@ namespace CgStairFinder
 
             if (process == null || process.HasExited)
             {
-                errorMessage = "ウィンドウの検出に失敗しました。";
+                errorMessage = "\u30A6\u30A3\u30F3\u30C9\u30A6\u306E\u691C\u51FA\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002";
                 return false;
             }
 
             var hProcess = OpenProcess(ProcessAccessAll, false, process.Id);
             if (hProcess == IntPtr.Zero)
             {
-                errorMessage = "ウィンドウのプロセスを開けませんでした。";
+                errorMessage = "\u30A6\u30A3\u30F3\u30C9\u30A6\u306E\u30D7\u30ED\u30BB\u30B9\u3092\u958B\u3051\u307E\u305B\u3093\u3067\u3057\u305F\u3002";
                 return false;
             }
 
@@ -75,14 +75,14 @@ namespace CgStairFinder
                 var mapNameBuffer = new byte[32];
                 if (!TryReadProcessMemory(hProcess, AddressMapName, mapNameBuffer))
                 {
-                    errorMessage = "マップ名を読み取れません。";
+                    errorMessage = "\u30DE\u30C3\u30D7\u540D\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002";
                     return false;
                 }
 
                 var mapPathBuffer = new byte[32];
                 if (!TryReadProcessMemory(hProcess, AddressMapPath, mapPathBuffer))
                 {
-                    errorMessage = "マップファイルパスを読み取れません。";
+                    errorMessage = "\u30DE\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u30D1\u30B9\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002";
                     return false;
                 }
 
@@ -95,14 +95,14 @@ namespace CgStairFinder
                 var positionBuffer = new byte[4];
                 if (!TryReadProcessMemory(hProcess, AddressEast, positionBuffer))
                 {
-                    errorMessage = "現在座標(東)を読み取れません。";
+                    errorMessage = "\u73FE\u5728\u5EA7\u6A19(\u6771)\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002";
                     return false;
                 }
                 var east = (int)(BitConverter.ToSingle(positionBuffer, 0) / 64);
 
                 if (!TryReadProcessMemory(hProcess, AddressSouth, positionBuffer))
                 {
-                    errorMessage = "現在座標(南)を読み取れません。";
+                    errorMessage = "\u73FE\u5728\u5EA7\u6A19(\u5357)\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002";
                     return false;
                 }
                 var south = (int)(BitConverter.ToSingle(positionBuffer, 0) / 64);
@@ -202,7 +202,6 @@ namespace CgStairFinder
                     }
                     catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is UnauthorizedAccessException)
                     {
-                        // mapPath が壊れている場合はフォールバックへ回す。
                     }
                 }
             }
@@ -270,7 +269,6 @@ namespace CgStairFinder
                 return string.Empty;
             }
 
-            // 日本語化前の挙動に合わせる。
             return Encoding.Default.GetString(bytes).Trim();
         }
 

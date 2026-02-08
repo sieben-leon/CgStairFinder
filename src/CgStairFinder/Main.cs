@@ -23,6 +23,7 @@ namespace CgStairFinder
         private const float MiniMapZoomMin = 1f;
         private const float MiniMapZoomMax = 8f;
         private const float MiniMapZoomStep = 1.2f;
+        private const int MiniMapDragRenderIntervalMs = 16;
 
         private CgMapStairFinder.CgMapData latestMapData;
         private int? latestEast;
@@ -36,8 +37,10 @@ namespace CgStairFinder
         private Point miniMapDragStart;
         private float miniMapDragStartPanX;
         private float miniMapDragStartPanY;
+        private int miniMapLastDragRenderTick;
 
         private Button buttonRecenterMap;
+        private Label labelMiniMapHint;
 
         public Main()
         {
@@ -47,6 +50,7 @@ namespace CgStairFinder
         private void Main_Load(object sender, EventArgs e)
         {
             InitializeMiniMapInteractions();
+            EnsureMiniMapHintLabel();
             SetCgDirDisplayText();
             CgListReload(true);
         }
@@ -62,11 +66,10 @@ namespace CgStairFinder
             pictureBoxMap.MouseUp += PictureBoxMap_MouseUp;
             pictureBoxMap.MouseLeave += PictureBoxMap_MouseLeave;
             pictureBoxMap.Resize += PictureBoxMap_Resize;
-            toolTip1.SetToolTip(pictureBoxMap, "ホイールで拡大・縮小");
 
             buttonRecenterMap = new Button
             {
-                Text = "⌖",
+                Text = "\u2316",
                 Size = new Size(28, 28),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(241, 245, 249),
@@ -74,13 +77,34 @@ namespace CgStairFinder
                 Visible = false,
                 TabStop = false
             };
+            buttonRecenterMap.Font = new Font("Segoe UI Symbol", 10f, FontStyle.Bold);
             buttonRecenterMap.FlatAppearance.BorderColor = Color.FromArgb(148, 163, 184);
             buttonRecenterMap.FlatAppearance.MouseOverBackColor = Color.FromArgb(226, 232, 240);
             buttonRecenterMap.FlatAppearance.MouseDownBackColor = Color.FromArgb(203, 213, 225);
             buttonRecenterMap.Click += ButtonRecenterMap_Click;
-            toolTip1.SetToolTip(buttonRecenterMap, "現在地を中央に戻す");
+            toolTip1.SetToolTip(buttonRecenterMap, "\u73FE\u5728\u5730\u3092\u4E2D\u592E\u306B\u623B\u3059");
             pictureBoxMap.Controls.Add(buttonRecenterMap);
             PositionRecenterButton();
+        }
+
+        private void EnsureMiniMapHintLabel()
+        {
+            if (labelMiniMapHint != null)
+            {
+                return;
+            }
+
+            labelMiniMapHint = new Label
+            {
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                ForeColor = Color.FromArgb(100, 116, 139),
+                Text = "\u30DF\u30CB\u30DE\u30C3\u30D7\u64CD\u4F5C: \u30DB\u30A4\u30FC\u30EB\u3067\u62E1\u5927\u30FB\u7E2E\u5C0F / \u30C9\u30E9\u30C3\u30B0\u3067\u79FB\u52D5",
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(3, 4, 3, 2)
+            };
+            tableLayoutPanel2.Controls.Add(labelMiniMapHint, 0, 5);
+            tableLayoutPanel2.SetColumnSpan(labelMiniMapHint, 2);
         }
 
         private void ButtonRecenterMap_Click(object sender, EventArgs e)
@@ -146,6 +170,15 @@ namespace CgStairFinder
             var dy = e.Y - miniMapDragStart.Y;
             miniMapPanX = miniMapDragStartPanX + dx;
             miniMapPanY = miniMapDragStartPanY + dy;
+            UpdateRecenterButtonVisibility();
+
+            var nowTick = Environment.TickCount;
+            if (nowTick - miniMapLastDragRenderTick < MiniMapDragRenderIntervalMs)
+            {
+                return;
+            }
+
+            miniMapLastDragRenderTick = nowTick;
             RefreshMiniMap();
         }
 
@@ -161,8 +194,13 @@ namespace CgStairFinder
 
         private void EndMiniMapDrag()
         {
+            var wasDragging = miniMapDragging;
             miniMapDragging = false;
             pictureBoxMap.Cursor = CanPanMiniMap() ? Cursors.Hand : Cursors.Default;
+            if (wasDragging)
+            {
+                RefreshMiniMap();
+            }
         }
 
         private bool CanPanMiniMap()
@@ -225,7 +263,7 @@ namespace CgStairFinder
 
             if (string.IsNullOrEmpty(cgDir))
             {
-                linkLabel2.Text = "ゲームフォルダが未設定です";
+                linkLabel2.Text = "\u30B2\u30FC\u30E0\u30D5\u30A9\u30EB\u30C0\u304C\u672A\u8A2D\u5B9A\u3067\u3059";
                 return;
             }
 
@@ -237,7 +275,7 @@ namespace CgStairFinder
         {
             var folderSelectionDialog = new FolderBrowserDialog
             {
-                Description = "ゲームフォルダを選択"
+                Description = "\u30B2\u30FC\u30E0\u30D5\u30A9\u30EB\u30C0\u3092\u9078\u629E"
             };
 
             folderSelectionDialog.ShowDialog();
@@ -249,7 +287,7 @@ namespace CgStairFinder
         private void CgListReload(bool selectFirstItem)
         {
             comboBox1.Items.Clear();
-            comboBox1.Items.Add("ウィンドウ未選択");
+            comboBox1.Items.Add("\u30A6\u30A3\u30F3\u30C9\u30A6\u672A\u9078\u629E");
             comboBox1.Items.AddRange(Process.GetProcessesByName("bluecg"));
             comboBox1.Items.AddRange(Process.GetProcessesByName("bluehd"));
             comboBox1.Items.AddRange(Process.GetProcessesByName("cg"));
@@ -257,9 +295,6 @@ namespace CgStairFinder
             comboBox1.SelectedIndex = Convert.ToInt32(selectFirstItem && comboBox1.Items.Count > 1);
         }
 
-        /// <summary>
-        /// 検出開始ボタン押下時の処理
-        /// </summary>
         private void Button1_Click(object sender, EventArgs e)
         {
             if (timer1.Enabled)
@@ -269,10 +304,14 @@ namespace CgStairFinder
             }
 
             var cgDir = Settings.Default.cgDir;
-            if (string.IsNullOrEmpty(cgDir) ||
-                !Directory.Exists($@"{cgDir}\map"))
+            if (string.IsNullOrEmpty(cgDir) || !Directory.Exists(Path.Combine(cgDir, "map")))
             {
-                MessageBox.Show(this, "起動に失敗しました。パスが正しいか確認してください。", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(
+                    this,
+                    "\u8D77\u52D5\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u30D1\u30B9\u304C\u6B63\u3057\u3044\u304B\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
                 return;
             }
 
@@ -283,7 +322,7 @@ namespace CgStairFinder
         {
             timer1.Interval = 10;
             timer1.Start();
-            button1.Text = "検出を停止";
+            button1.Text = "\u691C\u51FA\u3092\u505C\u6B62";
             button2.Enabled = false;
             comboBox1.Enabled = false;
         }
@@ -300,9 +339,10 @@ namespace CgStairFinder
             miniMapZoom = MiniMapZoomMin;
             miniMapPanX = 0f;
             miniMapPanY = 0f;
+            miniMapDragging = false;
             ClearMiniMap();
             UpdateRecenterButtonVisibility();
-            button1.Text = "検出を開始";
+            button1.Text = "\u691C\u51FA\u3092\u958B\u59CB";
             button2.Enabled = true;
             comboBox1.Enabled = true;
         }
@@ -329,7 +369,9 @@ namespace CgStairFinder
                 east,
                 south,
                 checkBoxShowTerrain.Checked,
+                miniMapDragging,
                 miniMapZoom,
+                latestMapPath ?? string.Empty,
                 miniMapPanX,
                 miniMapPanY);
 
@@ -342,21 +384,17 @@ namespace CgStairFinder
         {
             var r = Math.Atan2(stair.East - east, stair.South - south) / Math.PI * 180;
 
-            if (r <= -135 + 22.5 && r >= -135 - 22.5) { return "←"; }
-            if (r <= -90 + 22.5 && r >= -90 - 22.5) { return "↙"; }
-            if (r <= -45 + 22.5 && r >= -45 - 22.5) { return "↓"; }
-            if (r <= 0 + 22.5 && r >= 0 - 22.5) { return "↘"; }
-            if (r <= 45 + 22.5 && r >= 45 - 22.5) { return "→"; }
-            if (r <= 90 + 22.5 && r >= 90 - 22.5) { return "↗"; }
-            if (r <= 135 + 22.5 && r >= 135 - 22.5) { return "↑"; }
-            if (r < -135 - 22.5 || (r <= 180 + 22.5 && r >= 180 - 22.5)) { return "↖"; }
-
-            return string.Empty;
+            if (r <= -157.5 && r >= -180) return "\u2190";
+            if (r <= -112.5 && r > -157.5) return "\u2199";
+            if (r <= -67.5 && r > -112.5) return "\u2193";
+            if (r <= -22.5 && r > -67.5) return "\u2198";
+            if (r <= 22.5 && r > -22.5) return "\u2192";
+            if (r <= 67.5 && r > 22.5) return "\u2197";
+            if (r <= 112.5 && r > 67.5) return "\u2191";
+            if (r <= 157.5 && r > 112.5) return "\u2196";
+            return "\u2190";
         }
 
-        /// <summary>
-        /// 検出開始後のタイマー処理
-        /// </summary>
         private void Timer1_Tick(object sender, EventArgs e)
         {
             timer1.Interval = 500;
@@ -374,7 +412,7 @@ namespace CgStairFinder
                     var process = comboBox1.SelectedItem as Process;
                     if (process == null)
                     {
-                        throw new Exception("ウィンドウの検出に失敗しました。");
+                        throw new Exception("\u30A6\u30A3\u30F3\u30C9\u30A6\u306E\u691C\u51FA\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
                     }
 
                     CgClientMapSnapshot snapshot;
@@ -396,7 +434,7 @@ namespace CgStairFinder
 
                 if (mapFile == null || !mapFile.Exists)
                 {
-                    throw new Exception("マップファイルを読み取れません。");
+                    throw new Exception("\u30DE\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002");
                 }
 
                 Text = string.IsNullOrWhiteSpace(mapName) ? mapFile.Name : mapName;
@@ -404,10 +442,6 @@ namespace CgStairFinder
 
                 listBox1.Items.Clear();
                 var mapData = new CgMapStairFinder(mapFile).GetMapData();
-                latestMapData = mapData;
-                latestEast = east;
-                latestSouth = south;
-
                 var currentMapPath = mapFile.FullName;
                 if (!string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase))
                 {
@@ -415,13 +449,15 @@ namespace CgStairFinder
                     miniMapPanX = 0f;
                     miniMapPanY = 0f;
                 }
-
+                latestMapData = mapData;
+                latestEast = east;
+                latestSouth = south;
                 RefreshMiniMap();
 
                 var cgStairs = mapData.Stairs;
                 if (cgStairs.Count == 0)
                 {
-                    listBox1.Items.Add("階段が見つかりませんでした。");
+                    listBox1.Items.Add("\u968E\u6BB5\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
                     return;
                 }
 
@@ -438,7 +474,7 @@ namespace CgStairFinder
                     var type = CgStair.Translate(stair.Type);
                     if (!isSelectedWindow)
                     {
-                        listBox1.Items.Add($"東{stair.East}、南{stair.South} -- {type}");
+                        listBox1.Items.Add(string.Format("\u6771{0}\u3001\u5357{1} -- {2}", stair.East, stair.South, type));
                         continue;
                     }
 
@@ -448,7 +484,7 @@ namespace CgStairFinder
                         direction = GetDirection(east.Value, south.Value, stair);
                     }
 
-                    listBox1.Items.Add($"東{stair.East}、南{stair.South} {direction} -- {type}");
+                    listBox1.Items.Add(string.Format("\u6771{0}\u3001\u5357{1} {2} -- {3}", stair.East, stair.South, direction, type));
                 }
             }
             catch (IOException)
@@ -458,7 +494,12 @@ namespace CgStairFinder
             catch (Exception ex)
             {
                 Stop();
-                MessageBox.Show(this, $"エラーが発生したため自動検出を停止しました。\n\n{ex.Message}", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(
+                    this,
+                    string.Format("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u305F\u305F\u3081\u81EA\u52D5\u691C\u51FA\u3092\u505C\u6B62\u3057\u307E\u3057\u305F\u3002\n\n{0}", ex.Message),
+                    "\u30E1\u30C3\u30BB\u30FC\u30B8",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
         }
 
@@ -474,12 +515,9 @@ namespace CgStairFinder
             Array.Reverse(c);
             Array.Resize(ref c, 16);
             Array.Reverse(c);
-            label2.Text = $"...{new string(c)}";
+            label2.Text = string.Format("...{0}", new string(c));
         }
 
-        /// <summary>
-        /// リスト表示の行カラー描画
-        /// </summary>
         private void ListBox_DrawItem(object sender, DrawItemEventArgs e)
         {
             if (e.Index == -1)
@@ -517,7 +555,13 @@ namespace CgStairFinder
             }
 
             var textRect = new Rectangle(rowRect.X + 8, rowRect.Y + 2, rowRect.Width - 12, rowRect.Height - 2);
-            TextRenderer.DrawText(e.Graphics, text, Font, textRect, Color.FromArgb(15, 23, 42), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(
+                e.Graphics,
+                text,
+                Font,
+                textRect,
+                Color.FromArgb(15, 23, 42),
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
         private void Button2_Click(object sender, EventArgs e)
@@ -541,7 +585,7 @@ namespace CgStairFinder
         {
             if (!logs.Any())
             {
-                MessageBox.Show("記録がありません。", "メッセージ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("\u8A18\u9332\u304C\u3042\u308A\u307E\u305B\u3093\u3002", "\u30E1\u30C3\u30BB\u30FC\u30B8", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -550,17 +594,19 @@ namespace CgStairFinder
 
             foreach (var kv in logs.OrderBy(x => x.Value.DetectTime))
             {
-                var text = $"{kv.Value.DetectTime:yyyy-MM-dd HH:mm:ss} {kv.Key}";
+                var text = string.Format("{0:yyyy-MM-dd HH:mm:ss} {1}", kv.Value.DetectTime, kv.Key);
                 var recordMapName = kv.Value.MapName;
                 if (!string.IsNullOrWhiteSpace(recordMapName))
                 {
-                    text += $"({recordMapName})";
+                    text += string.Format("({0})", recordMapName);
                 }
 
                 text += ": ";
-                text += string.Join(" | ", from a in kv.Value.CgStairs
-                                           orderby a.Type
-                                           select $"{a.East}, {a.South} -- {CgStair.Translate(a.Type)}");
+                text += string.Join(
+                    " | ",
+                    from a in kv.Value.CgStairs
+                    orderby a.Type
+                    select string.Format("{0}, {1} -- {2}", a.East, a.South, CgStair.Translate(a.Type)));
                 sb.AppendLine(text);
             }
 
