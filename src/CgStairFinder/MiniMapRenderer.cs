@@ -25,6 +25,7 @@ namespace CgStairFinder
             int? east,
             int? south,
             IEnumerable<MapPin> pins,
+            bool useGameOrientation,
             bool showTerrain,
             bool freezeTerrainLayer,
             float zoom,
@@ -58,6 +59,14 @@ namespace CgStairFinder
 
                 var clipState = g.Save();
                 g.SetClip(bounds);
+                if (useGameOrientation)
+                {
+                    var centerX = bounds.Left + bounds.Width / 2f;
+                    var centerY = bounds.Top + bounds.Height / 2f;
+                    g.TranslateTransform(centerX, centerY);
+                    g.RotateTransform(-45f);
+                    g.TranslateTransform(-centerX, -centerY);
+                }
 
                 if (showTerrain)
                 {

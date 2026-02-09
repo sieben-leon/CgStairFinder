@@ -85,6 +85,7 @@
     </Compile>
     <Compile Include="MapPinCollectionService.cs" />
     <Compile Include="MapPin.cs" />
+    <Compile Include="MiniMapOverlayController.cs" />
     <Compile Include="Main.Designer.cs">
       <DependentUpon>Main.cs</DependentUpon>
     </Compile>

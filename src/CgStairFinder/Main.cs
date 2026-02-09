@@ -44,7 +44,11 @@ namespace CgStairFinder
 
         private Button buttonRecenterMap;
         private Button buttonManagePins;
+        private Button buttonMiniMapOnly;
+        private TableLayoutPanel mapOptionPanel;
+        private CheckBox checkBoxGameOrientation;
         private Label labelMiniMapHint;
+        private MiniMapOverlayController miniMapOverlayController;
 
         private enum StairListItemType
         {
@@ -77,10 +81,26 @@ namespace CgStairFinder
         {
             LoadLocalPins();
             InitializeMiniMapInteractions();
+            InitializeMiniMapOverlayController();
             EnsurePinManageButton();
+            EnsureMiniMapOnlyButton();
+            EnsureMapOptionPanel();
+            UpdateGameOrientationAvailability();
             EnsureMiniMapHintLabel();
             SetCgDirDisplayText();
             CgListReload(true);
+        }
+
+        private void InitializeMiniMapOverlayController()
+        {
+            if (miniMapOverlayController != null)
+            {
+                return;
+            }
+
+            miniMapOverlayController = new MiniMapOverlayController(listBox1.Font);
+            miniMapOverlayController.RestoreRequested += MiniMapOverlayController_RestoreRequested;
+            miniMapOverlayController.OverlayClosed += MiniMapOverlayController_OverlayClosed;
         }
 
         private void InitializeMiniMapInteractions()
@@ -153,6 +173,160 @@ namespace CgStairFinder
             buttonManagePins.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
             buttonManagePins.Click += ButtonManagePins_Click;
             flowLayoutPanelPin.Controls.Add(buttonManagePins);
+        }
+
+        private void EnsureMiniMapOnlyButton()
+        {
+            if (flowLayoutPanel2 == null || button1 == null)
+            {
+                return;
+            }
+
+            if (buttonMiniMapOnly == null)
+            {
+                buttonMiniMapOnly = new Button
+                {
+                    Text = "ミニマムビュー",
+                    Size = new Size(118, 32),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(241, 245, 249),
+                    Margin = new Padding(3, 3, 0, 0)
+                };
+                buttonMiniMapOnly.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+                buttonMiniMapOnly.Click += ButtonMiniMapOnly_Click;
+            }
+
+            button1.Margin = new Padding(3, 3, 0, 3);
+            flowLayoutPanel2.SuspendLayout();
+            flowLayoutPanel2.Controls.Clear();
+            flowLayoutPanel2.FlowDirection = FlowDirection.RightToLeft;
+            flowLayoutPanel2.WrapContents = true;
+            flowLayoutPanel2.Controls.Add(buttonMiniMapOnly);
+            flowLayoutPanel2.Controls.Add(button1);
+            flowLayoutPanel2.SetFlowBreak(buttonMiniMapOnly, true);
+            flowLayoutPanel2.ResumeLayout();
+        }
+
+        private void ButtonMiniMapOnly_Click(object sender, EventArgs e)
+        {
+            ToggleMiniMapOverlayMode();
+        }
+
+        private bool IsMiniMapOverlayActive()
+        {
+            return miniMapOverlayController != null && miniMapOverlayController.IsActive;
+        }
+
+        private void ToggleMiniMapOverlayMode()
+        {
+            if (IsMiniMapOverlayActive())
+            {
+                DisableMiniMapOverlayMode();
+                return;
+            }
+
+            EnableMiniMapOverlayMode();
+        }
+
+        private void EnableMiniMapOverlayMode()
+        {
+            InitializeMiniMapOverlayController();
+            miniMapOverlayController.Show(pictureBoxMap);
+            pictureBoxMap.Visible = false;
+            SyncMiniMapOverlayListFromMain();
+            RefreshMiniMap();
+            Hide();
+        }
+
+        private void DisableMiniMapOverlayMode()
+        {
+            if (miniMapOverlayController != null)
+            {
+                miniMapOverlayController.Hide();
+            }
+
+            pictureBoxMap.Visible = true;
+            if (!Visible)
+            {
+                Show();
+            }
+
+            Activate();
+            RefreshMiniMap();
+        }
+
+        private void MiniMapOverlayController_RestoreRequested(object sender, EventArgs e)
+        {
+            DisableMiniMapOverlayMode();
+        }
+
+        private void MiniMapOverlayController_OverlayClosed(object sender, EventArgs e)
+        {
+            if (IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            pictureBoxMap.Visible = true;
+            if (!Visible)
+            {
+                Show();
+                Activate();
+            }
+
+            RefreshMiniMap();
+        }
+
+        private void EnsureMapOptionPanel()
+        {
+            if (mapOptionPanel != null || flowLayoutPanel1 == null || checkBoxShowTerrain == null)
+            {
+                return;
+            }
+
+            mapOptionPanel = new TableLayoutPanel
+            {
+                AutoSize = true,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(6, 0, 0, 0),
+                Padding = new Padding(0)
+            };
+            mapOptionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            mapOptionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            mapOptionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            checkBoxGameOrientation = new CheckBox
+            {
+                AutoSize = true,
+                Text = "ゲーム内向き",
+                Checked = false,
+                Margin = new Padding(0, 0, 0, 0),
+                UseVisualStyleBackColor = true
+            };
+            checkBoxGameOrientation.CheckedChanged += CheckBoxGameOrientation_CheckedChanged;
+
+            flowLayoutPanel1.Controls.Remove(checkBoxShowTerrain);
+            checkBoxShowTerrain.Margin = new Padding(0, 7, 0, 0);
+
+            mapOptionPanel.Controls.Add(checkBoxShowTerrain, 0, 0);
+            mapOptionPanel.Controls.Add(checkBoxGameOrientation, 0, 1);
+            flowLayoutPanel1.Controls.Add(mapOptionPanel);
+        }
+
+        private void UpdateGameOrientationAvailability()
+        {
+            if (checkBoxGameOrientation == null || checkBoxShowTerrain == null)
+            {
+                return;
+            }
+
+            var enabled = checkBoxShowTerrain.Checked;
+            checkBoxGameOrientation.Enabled = enabled;
+            if (!enabled && checkBoxGameOrientation.Checked)
+            {
+                checkBoxGameOrientation.Checked = false;
+            }
         }
 
         private void ButtonRecenterMap_Click(object sender, EventArgs e)
@@ -299,6 +473,7 @@ namespace CgStairFinder
 
             var movedFromCenter = Math.Abs(miniMapPanX) > 0.5f || Math.Abs(miniMapPanY) > 0.5f;
             buttonRecenterMap.Visible =
+                !IsMiniMapOverlayActive() &&
                 latestEast.HasValue &&
                 latestSouth.HasValue &&
                 miniMapZoom > MiniMapZoomMin + 0.001f &&
@@ -394,6 +569,7 @@ namespace CgStairFinder
             timer1.Stop();
             label2.ResetText();
             listBox1.Items.Clear();
+            SyncMiniMapOverlayListFromMain();
             latestMapData = null;
             latestEast = null;
             latestSouth = null;
@@ -402,6 +578,7 @@ namespace CgStairFinder
             miniMapPanX = 0f;
             miniMapPanY = 0f;
             miniMapDragging = false;
+            DisableMiniMapOverlayMode();
             ClearMiniMap();
             UpdateRecenterButtonVisibility();
             button1.Text = "\u691C\u51FA\u3092\u958B\u59CB";
@@ -414,12 +591,21 @@ namespace CgStairFinder
             var oldImage = pictureBoxMap.Image;
             pictureBoxMap.Image = null;
             oldImage?.Dispose();
+
+            miniMapOverlayController?.ClearImage();
         }
 
         private void RenderMiniMap(CgMapStairFinder.CgMapData mapData, int? east, int? south)
         {
+            var overlayPictureBox = miniMapOverlayController == null ? null : miniMapOverlayController.ActivePictureBox;
+            var targetPictureBox = overlayPictureBox ?? pictureBoxMap;
+            if (targetPictureBox == null || targetPictureBox.IsDisposed)
+            {
+                targetPictureBox = pictureBoxMap;
+            }
+
             if (mapData == null || mapData.Width <= 0 || mapData.Height <= 0 ||
-                pictureBoxMap.ClientSize.Width <= 0 || pictureBoxMap.ClientSize.Height <= 0)
+                targetPictureBox.ClientSize.Width <= 0 || targetPictureBox.ClientSize.Height <= 0)
             {
                 ClearMiniMap();
                 return;
@@ -427,11 +613,12 @@ namespace CgStairFinder
 
             var miniMapPins = GetCurrentMapPinsForMiniMap();
             var bitmap = MiniMapRenderer.Render(
-                pictureBoxMap.ClientSize,
+                targetPictureBox.ClientSize,
                 mapData,
                 east,
                 south,
                 miniMapPins,
+                checkBoxGameOrientation != null && checkBoxGameOrientation.Checked,
                 checkBoxShowTerrain.Checked,
                 miniMapDragging,
                 miniMapZoom,
@@ -439,14 +626,37 @@ namespace CgStairFinder
                 miniMapPanX,
                 miniMapPanY);
 
-            var oldImage = pictureBoxMap.Image;
-            pictureBoxMap.Image = bitmap;
+            var oldImage = targetPictureBox.Image;
+            targetPictureBox.Image = bitmap;
             oldImage?.Dispose();
+
+            if (ReferenceEquals(targetPictureBox, pictureBoxMap))
+            {
+                pictureBoxMap.Visible = true;
+                miniMapOverlayController?.ClearImage();
+            }
+            else
+            {
+                pictureBoxMap.Visible = false;
+                oldImage = pictureBoxMap.Image;
+                pictureBoxMap.Image = null;
+                oldImage?.Dispose();
+            }
         }
 
         private static string GetDirection(int east, int south, CgStair stair)
         {
-            var r = Math.Atan2(stair.East - east, stair.South - south) / Math.PI * 180;
+            // CG's map axes are visually rotated on screen, so rotate by -45 deg
+            // to make "east" point to ↗ in the stair list.
+            var r = Math.Atan2(stair.East - east, stair.South - south) / Math.PI * 180 - 45;
+            if (r <= -180)
+            {
+                r += 360;
+            }
+            else if (r > 180)
+            {
+                r -= 360;
+            }
 
             if (r <= -157.5 && r >= -180) return "\u2190";
             if (r <= -112.5 && r > -157.5) return "\u2199";
@@ -504,7 +714,7 @@ namespace CgStairFinder
                     Pin = pin,
                     MapCode = mapCode,
                     IsShared = false,
-                    Text = MapPinCollectionService.BuildPinListText(pin, false)
+                    Text = BuildPinListText(pin, isSelectedWindow, east, south, false)
                 });
             }
 
@@ -516,7 +726,7 @@ namespace CgStairFinder
                     Pin = pin,
                     MapCode = mapCode,
                     IsShared = true,
-                    Text = MapPinCollectionService.BuildPinListText(pin, true)
+                    Text = BuildPinListText(pin, isSelectedWindow, east, south, true)
                 });
             }
 
@@ -528,6 +738,13 @@ namespace CgStairFinder
                     Text = "\u968E\u6BB5\u30FB\u30D4\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002"
                 });
             }
+
+            SyncMiniMapOverlayListFromMain();
+        }
+
+        private void SyncMiniMapOverlayListFromMain()
+        {
+            miniMapOverlayController?.SyncList(listBox1.Items);
         }
 
         private static string BuildStairListText(CgStair stair, bool isSelectedWindow, int? east, int? south, bool isShared)
@@ -546,6 +763,43 @@ namespace CgStairFinder
             }
 
             return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}", prefix, stair.East, stair.South, direction, type);
+        }
+
+        private static string BuildPinListText(MapPin pin, bool isSelectedWindow, int? east, int? south, bool isShared)
+        {
+            if (!isSelectedWindow || !east.HasValue || !south.HasValue)
+            {
+                return MapPinCollectionService.BuildPinListText(pin, isShared);
+            }
+
+            var prefix = isShared ? "\uFF0A" : string.Empty;
+            var direction = GetDirection(east.Value, south.Value, pin.East, pin.South);
+            return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}", prefix, pin.East, pin.South, direction, pin.Title);
+        }
+
+        private static string GetDirection(int east, int south, int targetEast, int targetSouth)
+        {
+            // CG's map axes are visually rotated on screen, so rotate by -45 deg
+            // to make "east" point to ↗ in the stair list.
+            var r = Math.Atan2(targetEast - east, targetSouth - south) / Math.PI * 180 - 45;
+            if (r <= -180)
+            {
+                r += 360;
+            }
+            else if (r > 180)
+            {
+                r -= 360;
+            }
+
+            if (r <= -157.5 && r >= -180) return "\u2190";
+            if (r <= -112.5 && r > -157.5) return "\u2199";
+            if (r <= -67.5 && r > -112.5) return "\u2193";
+            if (r <= -22.5 && r > -67.5) return "\u2198";
+            if (r <= 22.5 && r > -22.5) return "\u2192";
+            if (r <= 67.5 && r > 22.5) return "\u2197";
+            if (r <= 112.5 && r > 67.5) return "\u2191";
+            if (r <= 157.5 && r > 112.5) return "\u2196";
+            return "\u2190";
         }
 
         private IEnumerable<MapPin> GetCurrentMapPinsForMiniMap()
@@ -569,6 +823,7 @@ namespace CgStairFinder
             if (latestMapData == null && string.IsNullOrWhiteSpace(latestMapPath))
             {
                 listBox1.Items.Clear();
+                SyncMiniMapOverlayListFromMain();
                 return;
             }
 
@@ -1687,6 +1942,12 @@ namespace CgStairFinder
         }
 
         private void CheckBoxShowTerrain_CheckedChanged(object sender, EventArgs e)
+        {
+            UpdateGameOrientationAvailability();
+            RefreshMiniMap();
+        }
+
+        private void CheckBoxGameOrientation_CheckedChanged(object sender, EventArgs e)
         {
             RefreshMiniMap();
         }
