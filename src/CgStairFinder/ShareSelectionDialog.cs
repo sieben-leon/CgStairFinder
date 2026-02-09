@@ -15,6 +15,24 @@ namespace CgStairFinder
 
     internal static class ShareSelectionDialog
     {
+        private sealed class MapNameKeywordCandidate
+        {
+            public MapNameKeywordCandidate(string displayText, string searchText)
+            {
+                DisplayText = displayText ?? string.Empty;
+                SearchText = searchText ?? string.Empty;
+            }
+
+            public string DisplayText { get; }
+
+            public string SearchText { get; }
+
+            public override string ToString()
+            {
+                return DisplayText;
+            }
+        }
+
         public static bool TryShow(
             IWin32Window owner,
             Font font,
@@ -94,6 +112,20 @@ namespace CgStairFinder
                 {
                     inputKeyword.Items.Add(candidate);
                 }
+
+                inputKeyword.SelectionChangeCommitted += (s, e) =>
+                {
+                    var selectedCandidate = inputKeyword.SelectedItem as MapNameKeywordCandidate;
+                    if (selectedCandidate == null)
+                    {
+                        return;
+                    }
+
+                    inputKeyword.Text = selectedCandidate.SearchText;
+                    inputKeyword.SelectionStart = inputKeyword.Text.Length;
+                    inputKeyword.SelectionLength = 0;
+                    inputKeyword.SelectedIndex = -1;
+                };
 
                 buttonSelectVisible.Text = "全選択";
                 buttonSelectVisible.Width = 72;
@@ -302,34 +334,71 @@ namespace CgStairFinder
             }
         }
 
-        private static IEnumerable<string> BuildMapNameKeywordCandidates(IList<ShareLogItem> candidates)
+        private static IEnumerable<MapNameKeywordCandidate> BuildMapNameKeywordCandidates(IList<ShareLogItem> candidates)
         {
             if (candidates == null || candidates.Count == 0)
             {
-                return Enumerable.Empty<string>();
+                return Enumerable.Empty<MapNameKeywordCandidate>();
             }
 
             return candidates
                 .Where(x => x?.Log != null && !string.IsNullOrWhiteSpace(x.Log.MapName))
-                .Select(x => RemoveDigitsFromMapName(x.Log.MapName))
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .GroupBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+                .Select(x =>
+                {
+                    var mapName = (x.Log.MapName ?? string.Empty).Trim();
+                    return new
+                    {
+                        Display = ReplaceDigitsWithCircle(mapName),
+                        Search = ExtractPrefixBeforeFirstDigit(mapName)
+                    };
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.Display) &&
+                            !string.IsNullOrWhiteSpace(x.Search) &&
+                            x.Display.Contains('〇'))
+                .GroupBy(x => x.Display, StringComparer.CurrentCultureIgnoreCase)
                 .Where(g => g.Count() >= 5)
                 .OrderByDescending(g => g.Count())
                 .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
-                .Select(g => g.Key)
+                .Select(g =>
+                {
+                    var selectedSearch = g
+                        .GroupBy(x => x.Search, StringComparer.CurrentCultureIgnoreCase)
+                        .OrderByDescending(x => x.Count())
+                        .ThenBy(x => x.Key, StringComparer.CurrentCultureIgnoreCase)
+                        .Select(x => x.Key)
+                        .FirstOrDefault() ?? string.Empty;
+                    return new MapNameKeywordCandidate(g.Key, selectedSearch);
+                })
                 .ToList();
         }
 
-        private static string RemoveDigitsFromMapName(string mapName)
+        private static string ReplaceDigitsWithCircle(string mapName)
         {
             if (string.IsNullOrWhiteSpace(mapName))
             {
                 return string.Empty;
             }
 
-            var chars = mapName.Where(ch => !char.IsDigit(ch)).ToArray();
+            var chars = mapName.Select(ch => char.IsDigit(ch) ? '〇' : ch).ToArray();
             return new string(chars).Trim();
+        }
+
+        private static string ExtractPrefixBeforeFirstDigit(string mapName)
+        {
+            if (string.IsNullOrWhiteSpace(mapName))
+            {
+                return string.Empty;
+            }
+
+            for (var i = 0; i < mapName.Length; i++)
+            {
+                if (char.IsDigit(mapName[i]))
+                {
+                    return mapName.Substring(0, i).TrimEnd();
+                }
+            }
+
+            return string.Empty;
         }
     }
 }

@@ -101,6 +101,7 @@ namespace CgStairFinder
             miniMapOverlayController = new MiniMapOverlayController(listBox1.Font, listBox1.ItemHeight, ListBox_DrawItem);
             miniMapOverlayController.RestoreRequested += MiniMapOverlayController_RestoreRequested;
             miniMapOverlayController.OverlayClosed += MiniMapOverlayController_OverlayClosed;
+            miniMapOverlayController.OverlayResized += MiniMapOverlayController_OverlayResized;
         }
 
         private void InitializeMiniMapInteractions()
@@ -272,6 +273,16 @@ namespace CgStairFinder
             {
                 Show();
                 Activate();
+            }
+
+            RefreshMiniMap();
+        }
+
+        private void MiniMapOverlayController_OverlayResized(object sender, EventArgs e)
+        {
+            if (IsDisposed || Disposing || !IsMiniMapOverlayActive())
+            {
+                return;
             }
 
             RefreshMiniMap();
@@ -693,6 +704,7 @@ namespace CgStairFinder
             DetectLog sharedLog;
             if (!string.IsNullOrWhiteSpace(mapCode) && sharedLogs.TryGetValue(mapCode, out sharedLog))
             {
+                var sharedElapsed = BuildElapsedAgoText(sharedLog.DetectTime, DateTime.Now);
                 foreach (var stair in sharedLog.CgStairs ?? Enumerable.Empty<CgStair>())
                 {
                     listBox1.Items.Add(new StairListItem
@@ -701,7 +713,7 @@ namespace CgStairFinder
                         StairType = stair.Type,
                         MapCode = mapCode,
                         IsShared = true,
-                        Text = BuildStairListText(stair, isSelectedWindow, east, south, true)
+                        Text = BuildStairListText(stair, isSelectedWindow, east, south, true, sharedElapsed)
                     });
                 }
             }
@@ -747,13 +759,20 @@ namespace CgStairFinder
             miniMapOverlayController?.SyncList(listBox1.Items);
         }
 
-        private static string BuildStairListText(CgStair stair, bool isSelectedWindow, int? east, int? south, bool isShared)
+        private static string BuildStairListText(
+            CgStair stair,
+            bool isSelectedWindow,
+            int? east,
+            int? south,
+            bool isShared,
+            string elapsedAgo = null)
         {
             var prefix = isShared ? "\uFF0A" : string.Empty;
             var type = CgStair.Translate(stair.Type);
+            var elapsedSuffix = string.IsNullOrWhiteSpace(elapsedAgo) ? string.Empty : " " + elapsedAgo;
             if (!isSelectedWindow)
             {
-                return string.Format("{0}\u6771{1}\u3001\u5357{2} -- {3}", prefix, stair.East, stair.South, type);
+                return string.Format("{0}\u6771{1}\u3001\u5357{2} -- {3}{4}", prefix, stair.East, stair.South, type, elapsedSuffix);
             }
 
             var direction = string.Empty;
@@ -762,7 +781,42 @@ namespace CgStairFinder
                 direction = GetDirection(east.Value, south.Value, stair);
             }
 
-            return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}", prefix, stair.East, stair.South, direction, type);
+            return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}{5}", prefix, stair.East, stair.South, direction, type, elapsedSuffix);
+        }
+
+        private static string BuildElapsedAgoText(DateTime detectTime, DateTime now)
+        {
+            if (detectTime == default(DateTime))
+            {
+                return string.Empty;
+            }
+
+            var elapsed = now - detectTime;
+            if (elapsed < TimeSpan.Zero)
+            {
+                elapsed = TimeSpan.Zero;
+            }
+
+            if (elapsed.TotalDays >= 1)
+            {
+                var days = (int)elapsed.TotalDays;
+                var hours = elapsed.Hours;
+                return hours > 0
+                    ? string.Format("({0}d{1}h前)", days, hours)
+                    : string.Format("({0}d前)", days);
+            }
+
+            if (elapsed.TotalHours >= 1)
+            {
+                var hours = (int)elapsed.TotalHours;
+                var minutes = elapsed.Minutes;
+                return minutes > 0
+                    ? string.Format("({0}h{1}m前)", hours, minutes)
+                    : string.Format("({0}h前)", hours);
+            }
+
+            var mins = Math.Max(1, (int)elapsed.TotalMinutes);
+            return string.Format("({0}m前)", mins);
         }
 
         private static string BuildPinListText(MapPin pin, bool isSelectedWindow, int? east, int? south, bool isShared)
