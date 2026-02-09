@@ -2082,6 +2082,15 @@ namespace CgStairFinder
 
             using (var form = new Form())
             using (var label = new Label())
+            using (var filterPanel = new FlowLayoutPanel())
+            using (var labelRecent = new Label())
+            using (var inputRecentHours = new NumericUpDown())
+            using (var labelRecentSuffix = new Label())
+            using (var labelKeyword = new Label())
+            using (var inputKeyword = new ComboBox())
+            using (var buttonSelectVisible = new Button())
+            using (var buttonUnselectVisible = new Button())
+            using (var labelStatus = new Label())
             using (var checkedList = new CheckedListBox())
             using (var checkIncludeMapFiles = new CheckBox())
             using (var checkIncludePins = new CheckBox())
@@ -2104,13 +2113,67 @@ namespace CgStairFinder
                 label.TextAlign = ContentAlignment.MiddleLeft;
                 label.Text = "\u5171\u6709\u3059\u308B\u30DE\u30C3\u30D7\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
 
+                filterPanel.AutoSize = false;
+                filterPanel.Dock = DockStyle.Top;
+                filterPanel.Height = 58;
+                filterPanel.Padding = new Padding(8, 2, 8, 2);
+                filterPanel.FlowDirection = FlowDirection.LeftToRight;
+                filterPanel.WrapContents = true;
+
+                labelRecent.AutoSize = true;
+                labelRecent.Margin = new Padding(0, 8, 4, 0);
+                labelRecent.Text = "\u76F4\u8FD1";
+
+                inputRecentHours.Minimum = 0;
+                inputRecentHours.Maximum = 999;
+                inputRecentHours.Value = 0;
+                inputRecentHours.Width = 60;
+                inputRecentHours.Margin = new Padding(0, 4, 4, 0);
+
+                labelRecentSuffix.AutoSize = true;
+                labelRecentSuffix.Margin = new Padding(0, 8, 10, 0);
+                labelRecentSuffix.Text = "\u5206\u4EE5\u5185";
+
+                labelKeyword.AutoSize = true;
+                labelKeyword.Margin = new Padding(0, 8, 4, 0);
+                labelKeyword.Text = "\u30DE\u30C3\u30D7\u540D";
+
+                inputKeyword.DropDownStyle = ComboBoxStyle.DropDown;
+                inputKeyword.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+                inputKeyword.AutoCompleteSource = AutoCompleteSource.ListItems;
+                inputKeyword.Width = 180;
+                inputKeyword.Margin = new Padding(0, 4, 10, 0);
+                foreach (var candidate in BuildMapNameKeywordCandidates(candidates))
+                {
+                    inputKeyword.Items.Add(candidate);
+                }
+
+                buttonSelectVisible.Text = "\u5168\u9078\u629E";
+                buttonSelectVisible.Width = 72;
+                buttonSelectVisible.Margin = new Padding(0, 3, 4, 0);
+
+                buttonUnselectVisible.Text = "\u5168\u89E3\u9664";
+                buttonUnselectVisible.Width = 72;
+                buttonUnselectVisible.Margin = new Padding(0, 3, 0, 0);
+
+                filterPanel.Controls.Add(labelRecent);
+                filterPanel.Controls.Add(inputRecentHours);
+                filterPanel.Controls.Add(labelRecentSuffix);
+                filterPanel.Controls.Add(labelKeyword);
+                filterPanel.Controls.Add(inputKeyword);
+                filterPanel.Controls.Add(buttonSelectVisible);
+                filterPanel.Controls.Add(buttonUnselectVisible);
+
+                labelStatus.AutoSize = false;
+                labelStatus.Dock = DockStyle.Top;
+                labelStatus.Height = 22;
+                labelStatus.Padding = new Padding(8, 0, 8, 0);
+                labelStatus.TextAlign = ContentAlignment.MiddleLeft;
+                labelStatus.ForeColor = Color.FromArgb(100, 116, 139);
+
                 checkedList.Dock = DockStyle.Fill;
                 checkedList.CheckOnClick = true;
                 checkedList.HorizontalScrollbar = true;
-                for (var i = 0; i < candidates.Count; i++)
-                {
-                    checkedList.Items.Add(candidates[i], true);
-                }
 
                 checkIncludeMapFiles.AutoSize = true;
                 checkIncludeMapFiles.Dock = DockStyle.Bottom;
@@ -2143,27 +2206,180 @@ namespace CgStairFinder
                 buttonPanel.Controls.Add(buttonOk);
                 buttonPanel.Controls.Add(buttonCancel);
 
+                var checkedState = candidates.ToDictionary(x => x, x => true);
+                var isRefreshing = false;
+
+                Func<ShareLogItem, bool> matchFilter = item =>
+                {
+                    if (item == null || item.Log == null)
+                    {
+                        return false;
+                    }
+
+                    var hours = (int)inputRecentHours.Value;
+                    if (hours > 0)
+                    {
+                        var threshold = DateTime.Now.AddMinutes(-hours);
+                        if (item.Log.DetectTime < threshold)
+                        {
+                            return false;
+                        }
+                    }
+
+                    var keyword = (inputKeyword.Text ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(keyword))
+                    {
+                        var mapName = item.Log.MapName ?? string.Empty;
+                        if (mapName.IndexOf(keyword, StringComparison.CurrentCultureIgnoreCase) < 0)
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                };
+
+                Action refreshVisibleItems = () =>
+                {
+                    isRefreshing = true;
+                    try
+                    {
+                        for (var i = 0; i < checkedList.Items.Count; i++)
+                        {
+                            var existing = checkedList.Items[i] as ShareLogItem;
+                            if (existing != null)
+                            {
+                                checkedState[existing] = checkedList.GetItemChecked(i);
+                            }
+                        }
+
+                        checkedList.Items.Clear();
+                        var visibleCount = 0;
+                        foreach (var candidate in candidates)
+                        {
+                            if (!matchFilter(candidate))
+                            {
+                                continue;
+                            }
+
+                            visibleCount++;
+                            bool isChecked;
+                            if (!checkedState.TryGetValue(candidate, out isChecked))
+                            {
+                                isChecked = true;
+                                checkedState[candidate] = true;
+                            }
+
+                            checkedList.Items.Add(candidate, isChecked);
+                        }
+
+                        var selectedCount = checkedState.Count(x => x.Value);
+                        labelStatus.Text = string.Format(
+                            "\u8868\u793A: {0} / \u5168\u4EF6: {1}    \u9078\u629E: {2}",
+                            visibleCount,
+                            candidates.Count,
+                            selectedCount);
+                    }
+                    finally
+                    {
+                        isRefreshing = false;
+                    }
+                };
+
+                checkedList.ItemCheck += (s, e) =>
+                {
+                    if (isRefreshing || e.Index < 0 || e.Index >= checkedList.Items.Count)
+                    {
+                        return;
+                    }
+
+                    var item = checkedList.Items[e.Index] as ShareLogItem;
+                    if (item == null)
+                    {
+                        return;
+                    }
+
+                    checkedState[item] = e.NewValue == CheckState.Checked;
+                    form.BeginInvoke((Action)refreshVisibleItems);
+                };
+
+                inputRecentHours.ValueChanged += (s, e) => refreshVisibleItems();
+                inputKeyword.TextChanged += (s, e) => refreshVisibleItems();
+
+                buttonSelectVisible.Click += (s, e) =>
+                {
+                    foreach (var item in checkedList.Items.Cast<ShareLogItem>())
+                    {
+                        checkedState[item] = true;
+                    }
+
+                    refreshVisibleItems();
+                };
+
+                buttonUnselectVisible.Click += (s, e) =>
+                {
+                    foreach (var item in checkedList.Items.Cast<ShareLogItem>())
+                    {
+                        checkedState[item] = false;
+                    }
+
+                    refreshVisibleItems();
+                };
+
                 form.Controls.Add(checkedList);
                 form.Controls.Add(checkIncludePins);
                 form.Controls.Add(checkIncludeMapFiles);
                 form.Controls.Add(buttonPanel);
+                form.Controls.Add(labelStatus);
+                form.Controls.Add(filterPanel);
                 form.Controls.Add(label);
                 form.AcceptButton = buttonOk;
                 form.CancelButton = buttonCancel;
+                refreshVisibleItems();
 
                 if (form.ShowDialog(this) != DialogResult.OK)
                 {
                     return false;
                 }
 
-                selectedLogs = checkedList.CheckedItems
-                    .Cast<ShareLogItem>()
+                selectedLogs = candidates
+                    .Where(x => checkedState.ContainsKey(x) && checkedState[x])
                     .Select(x => x.Log)
                     .ToList();
                 includeMapFiles = checkIncludeMapFiles.Checked;
                 includePins = checkIncludePins.Checked;
                 return true;
             }
+        }
+
+        private static IEnumerable<string> BuildMapNameKeywordCandidates(IList<ShareLogItem> candidates)
+        {
+            if (candidates == null || candidates.Count == 0)
+            {
+                return Enumerable.Empty<string>();
+            }
+
+            return candidates
+                .Where(x => x?.Log != null && !string.IsNullOrWhiteSpace(x.Log.MapName))
+                .Select(x => RemoveDigitsFromMapName(x.Log.MapName))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .GroupBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+                .Where(g => g.Count() >= 5)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+                .Select(g => g.Key)
+                .ToList();
+        }
+
+        private static string RemoveDigitsFromMapName(string mapName)
+        {
+            if (string.IsNullOrWhiteSpace(mapName))
+            {
+                return string.Empty;
+            }
+
+            var chars = mapName.Where(ch => !char.IsDigit(ch)).ToArray();
+            return new string(chars).Trim();
         }
 
         private void Button7_Click(object sender, EventArgs e)
