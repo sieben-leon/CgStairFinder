@@ -682,6 +682,7 @@ namespace CgStairFinder
 
         private void PopulateStairList(
             string mapCode,
+            string mapRelativePath,
             bool isSelectedWindow,
             int? east,
             int? south,
@@ -701,8 +702,8 @@ namespace CgStairFinder
                 });
             }
 
-            DetectLog sharedLog;
-            if (!string.IsNullOrWhiteSpace(mapCode) && sharedLogs.TryGetValue(mapCode, out sharedLog))
+            var sharedLog = FindBestLogForMap(sharedLogs, mapCode, mapRelativePath);
+            if (sharedLog != null)
             {
                 var sharedElapsed = BuildElapsedAgoText(sharedLog.DetectTime, DateTime.Now);
                 foreach (var stair in sharedLog.CgStairs ?? Enumerable.Empty<CgStair>())
@@ -882,9 +883,10 @@ namespace CgStairFinder
             }
 
             var mapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
+            var mapRelativePath = GetRelativePathFromLatestMapPath();
             var localStairs = latestMapData?.Stairs ?? (IList<CgStair>)new List<CgStair>();
             var isSelectedWindow = comboBox1.SelectedIndex > 0;
-            PopulateStairList(mapCode, isSelectedWindow, latestEast, latestSouth, localStairs);
+            PopulateStairList(mapCode, mapRelativePath, isSelectedWindow, latestEast, latestSouth, localStairs);
         }
 
         private string ResolveMapNameForCurrentMap(string currentMapCode, string snapshotMapName, string previousMapCode, bool mapChanged, bool isSelectedWindow)
@@ -929,18 +931,15 @@ namespace CgStairFinder
                 return string.Empty;
             }
 
-            DetectLog knownLog;
-            if (logs.TryGetValue(mapCode, out knownLog) && !string.IsNullOrWhiteSpace(knownLog.MapName))
-            {
-                return knownLog.MapName;
-            }
-
-            if (sharedLogs.TryGetValue(mapCode, out knownLog) && !string.IsNullOrWhiteSpace(knownLog.MapName))
-            {
-                return knownLog.MapName;
-            }
-
-            return string.Empty;
+            var candidates = logs.Values
+                .Concat(sharedLogs.Values)
+                .Where(x => x != null &&
+                            string.Equals(x.MapCode, mapCode, StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(x.MapName))
+                .OrderByDescending(x => x.DetectTime)
+                .Select(x => x.MapName)
+                .FirstOrDefault();
+            return candidates ?? string.Empty;
         }
 
         private void Timer1_Tick(object sender, EventArgs e)
@@ -1017,6 +1016,7 @@ namespace CgStairFinder
 
                 var currentMapCode = mapFile.Name;
                 var currentMapPath = mapFile.FullName;
+                var currentMapRelativePath = GetRelativeMapPath(mapFile);
                 var previousMapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
                 var mapChanged = !string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase);
 
@@ -1039,19 +1039,19 @@ namespace CgStairFinder
                 var cgStairs = mapData.Stairs;
                 if (cgStairs.Count > 0)
                 {
-                    DetectLog existingLog;
-                    logs.TryGetValue(currentMapCode, out existingLog);
-                    logs[currentMapCode] = new DetectLog
+                    var existingLog = FindBestLogForMap(logs, currentMapCode, currentMapRelativePath);
+                    var logStorageKey = BuildLogStorageKey(currentMapCode, currentMapRelativePath);
+                    logs[logStorageKey] = new DetectLog
                     {
                         MapCode = currentMapCode,
-                        MapRelativePath = GetRelativeMapPath(mapFile),
+                        MapRelativePath = currentMapRelativePath,
                         MapName = ChooseStoredMapName(mapName, existingLog),
                         CgStairs = cgStairs,
                         DetectTime = DateTime.Now
                     };
                 }
 
-                PopulateStairList(currentMapCode, isSelectedWindow, east, south, cgStairs);
+                PopulateStairList(currentMapCode, currentMapRelativePath, isSelectedWindow, east, south, cgStairs);
             }
             catch (IOException)
             {
@@ -1686,14 +1686,14 @@ namespace CgStairFinder
         {
             var result = new List<ShareLogItem>();
             var latestLocal = logs.Values
-                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
-                .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
+                .Where(x => x != null)
+                .GroupBy(BuildLogIdentityKey, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.OrderByDescending(x => x.DetectTime).First());
             result.AddRange(latestLocal.Select(x => new ShareLogItem { Log = x, IsSharedSource = false }));
 
             foreach (var shared in sharedLogs.Values.Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode)))
             {
-                if (result.Any(x => string.Equals(x.Log.MapCode, shared.MapCode, StringComparison.OrdinalIgnoreCase)))
+                if (result.Any(x => string.Equals(BuildLogIdentityKey(x.Log), BuildLogIdentityKey(shared), StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
@@ -1704,6 +1704,92 @@ namespace CgStairFinder
             return result
                 .OrderBy(x => x.Log.MapCode, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private string GetRelativePathFromLatestMapPath()
+        {
+            if (string.IsNullOrWhiteSpace(latestMapPath))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return GetRelativeMapPath(new FileInfo(latestMapPath));
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string BuildLogStorageKey(string mapCode, string mapRelativePath)
+        {
+            var normalizedRelativePath = NormalizeLogRelativePath(mapRelativePath);
+            if (!string.IsNullOrWhiteSpace(normalizedRelativePath))
+            {
+                return "path:" + normalizedRelativePath;
+            }
+
+            return "code:" + (mapCode ?? string.Empty).Trim();
+        }
+
+        private static string BuildLogIdentityKey(DetectLog log)
+        {
+            if (log == null)
+            {
+                return string.Empty;
+            }
+
+            var normalizedRelativePath = NormalizeLogRelativePath(log.MapRelativePath);
+            if (!string.IsNullOrWhiteSpace(normalizedRelativePath))
+            {
+                return "path:" + normalizedRelativePath;
+            }
+
+            return "code:" + (log.MapCode ?? string.Empty).Trim();
+        }
+
+        private static string NormalizeLogRelativePath(string mapRelativePath)
+        {
+            if (string.IsNullOrWhiteSpace(mapRelativePath))
+            {
+                return string.Empty;
+            }
+
+            return mapRelativePath.Trim().Replace('/', '\\').TrimStart('\\').ToLowerInvariant();
+        }
+
+        private static DetectLog FindBestLogForMap(
+            IDictionary<string, DetectLog> source,
+            string mapCode,
+            string mapRelativePath)
+        {
+            if (source == null || source.Count == 0)
+            {
+                return null;
+            }
+
+            var normalizedRelativePath = NormalizeLogRelativePath(mapRelativePath);
+            if (!string.IsNullOrWhiteSpace(normalizedRelativePath))
+            {
+                var byRelativePath = source.Values
+                    .Where(x => x != null &&
+                                string.Equals(NormalizeLogRelativePath(x.MapRelativePath), normalizedRelativePath, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(x => x.DetectTime)
+                    .FirstOrDefault();
+                if (byRelativePath != null)
+                {
+                    return byRelativePath;
+                }
+            }
+
+            return source.Values
+                .Where(x => x != null &&
+                            !string.IsNullOrWhiteSpace(x.MapCode) &&
+                            string.Equals(x.MapCode, mapCode, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.DetectTime)
+                .FirstOrDefault();
         }
 
         private string GetMapDirectoryPath()

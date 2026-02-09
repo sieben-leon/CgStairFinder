@@ -87,10 +87,6 @@ namespace CgStairFinder
                 }
 
                 var mapFile = ResolveMapFile(cgDir, mapPathBuffer);
-                if (mapFile == null || !mapFile.Exists)
-                {
-                    mapFile = GetLatestMapFile(cgDir);
-                }
 
                 var positionBuffer = new byte[4];
                 if (!TryReadProcessMemory(hProcess, AddressEast, positionBuffer))
@@ -149,6 +145,24 @@ namespace CgStairFinder
             }
             else if (!string.IsNullOrWhiteSpace(cgDir))
             {
+                var pathWithoutLeadingSlash = rawPath.TrimStart('\\');
+                if (pathWithoutLeadingSlash.StartsWith("map\\", StringComparison.OrdinalIgnoreCase))
+                {
+                    var combinedFromMapRoot = TryCombine(cgDir, pathWithoutLeadingSlash);
+                    if (!string.IsNullOrWhiteSpace(combinedFromMapRoot))
+                    {
+                        candidates.Add(combinedFromMapRoot);
+                    }
+                }
+                else
+                {
+                    var combinedUnderMap = TryCombine(TryCombine(cgDir, "map"), pathWithoutLeadingSlash);
+                    if (!string.IsNullOrWhiteSpace(combinedUnderMap))
+                    {
+                        candidates.Add(combinedUnderMap);
+                    }
+                }
+
                 var combined = TryCombine(cgDir, rawPath);
                 if (!string.IsNullOrWhiteSpace(combined))
                 {
@@ -172,37 +186,6 @@ namespace CgStairFinder
                 if (file != null && file.Exists)
                 {
                     return file;
-                }
-            }
-
-            var mapDir = TryCombine(cgDir, "map");
-            if (!string.IsNullOrWhiteSpace(mapDir) && Directory.Exists(mapDir))
-            {
-                string fileName;
-                try
-                {
-                    fileName = Path.GetFileName(rawPath);
-                }
-                catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException)
-                {
-                    return null;
-                }
-
-                if (!string.IsNullOrWhiteSpace(fileName))
-                {
-                    try
-                    {
-                        var file = new DirectoryInfo(mapDir)
-                            .GetFiles(fileName, SearchOption.AllDirectories)
-                            .FirstOrDefault();
-                        if (file != null)
-                        {
-                            return file;
-                        }
-                    }
-                    catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is UnauthorizedAccessException)
-                    {
-                    }
                 }
             }
 

@@ -374,10 +374,11 @@ namespace CgStairFinder
                     continue;
                 }
 
+                var logStorageKey = BuildLogStorageKey(detectLog);
                 DetectLog existing;
-                if (!targetLogs.TryGetValue(detectLog.MapCode, out existing))
+                if (!targetLogs.TryGetValue(logStorageKey, out existing))
                 {
-                    targetLogs[detectLog.MapCode] = detectLog;
+                    targetLogs[logStorageKey] = detectLog;
                     result.Added++;
                     MergeEntryPins(targetPins, detectLog.MapCode, entry.Pins, result);
                     continue;
@@ -385,7 +386,7 @@ namespace CgStairFinder
 
                 if (detectLog.DetectTime > existing.DetectTime)
                 {
-                    targetLogs[detectLog.MapCode] = detectLog;
+                    targetLogs[logStorageKey] = detectLog;
                     result.Updated++;
                 }
                 else
@@ -397,6 +398,22 @@ namespace CgStairFinder
             }
 
             return result;
+        }
+
+        private static string BuildLogStorageKey(DetectLog log)
+        {
+            if (log == null)
+            {
+                return "code:";
+            }
+
+            var relativePath = NormalizeRelativePath(log.MapRelativePath);
+            if (!string.IsNullOrWhiteSpace(relativePath))
+            {
+                return "path:" + relativePath.ToLowerInvariant();
+            }
+
+            return "code:" + (NormalizeMapCode(log.MapCode) ?? string.Empty);
         }
 
         private static void MergeEntryPins(
