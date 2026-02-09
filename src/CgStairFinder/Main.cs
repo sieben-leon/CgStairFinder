@@ -68,35 +68,6 @@ namespace CgStairFinder
             }
         }
 
-        private sealed class LocalPinManagerItem
-        {
-            public string MapCode { get; set; }
-            public MapPin Pin { get; set; }
-
-            public override string ToString()
-            {
-                if (Pin == null)
-                {
-                    return MapCode ?? string.Empty;
-                }
-
-                return string.Format("{0} | 東{1}、南{2} -- {3}", MapCode, Pin.East, Pin.South, Pin.Title);
-            }
-        }
-
-        private sealed class ShareLogItem
-        {
-            public DetectLog Log { get; set; }
-            public bool IsSharedSource { get; set; }
-
-            public override string ToString()
-            {
-                var source = IsSharedSource ? "\u5171\u6709" : "\u30ED\u30FC\u30AB\u30EB";
-                var mapName = string.IsNullOrWhiteSpace(Log.MapName) ? string.Empty : string.Format(" ({0})", Log.MapName);
-                return string.Format("{0}{1} [{2}] {3:yyyy-MM-dd HH:mm:ss}", Log.MapCode, mapName, source, Log.DetectTime);
-            }
-        }
-
         public Main()
         {
             InitializeComponent();
@@ -525,7 +496,7 @@ namespace CgStairFinder
                 }
             }
 
-            foreach (var pin in GetMapPins(localPins, mapCode).OrderBy(x => x.East).ThenBy(x => x.South).ThenBy(x => x.Title))
+            foreach (var pin in MapPinCollectionService.GetMapPins(localPins, mapCode).OrderBy(x => x.East).ThenBy(x => x.South).ThenBy(x => x.Title))
             {
                 listBox1.Items.Add(new StairListItem
                 {
@@ -533,11 +504,11 @@ namespace CgStairFinder
                     Pin = pin,
                     MapCode = mapCode,
                     IsShared = false,
-                    Text = BuildPinListText(pin, false)
+                    Text = MapPinCollectionService.BuildPinListText(pin, false)
                 });
             }
 
-            foreach (var pin in GetMapPins(sharedPins, mapCode).OrderBy(x => x.East).ThenBy(x => x.South).ThenBy(x => x.Title))
+            foreach (var pin in MapPinCollectionService.GetMapPins(sharedPins, mapCode).OrderBy(x => x.East).ThenBy(x => x.South).ThenBy(x => x.Title))
             {
                 listBox1.Items.Add(new StairListItem
                 {
@@ -545,7 +516,7 @@ namespace CgStairFinder
                     Pin = pin,
                     MapCode = mapCode,
                     IsShared = true,
-                    Text = BuildPinListText(pin, true)
+                    Text = MapPinCollectionService.BuildPinListText(pin, true)
                 });
             }
 
@@ -577,12 +548,6 @@ namespace CgStairFinder
             return string.Format("{0}\u6771{1}\u3001\u5357{2} {3} -- {4}", prefix, stair.East, stair.South, direction, type);
         }
 
-        private static string BuildPinListText(MapPin pin, bool isShared)
-        {
-            var prefix = isShared ? "\uFF0A" : string.Empty;
-            return string.Format("{0}\u6771{1}\u3001\u5357{2} -- {3}", prefix, pin.East, pin.South, pin.Title);
-        }
-
         private IEnumerable<MapPin> GetCurrentMapPinsForMiniMap()
         {
             var mapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
@@ -591,62 +556,12 @@ namespace CgStairFinder
                 return Enumerable.Empty<MapPin>();
             }
 
-            return GetMapPins(localPins, mapCode)
-                .Concat(GetMapPins(sharedPins, mapCode))
+            return MapPinCollectionService.GetMapPins(localPins, mapCode)
+                .Concat(MapPinCollectionService.GetMapPins(sharedPins, mapCode))
                 .Where(x => x != null)
                 .GroupBy(x => new { x.East, x.South, x.Title })
                 .Select(x => x.First())
                 .ToList();
-        }
-
-        private static IEnumerable<MapPin> GetMapPins(IDictionary<string, IList<MapPin>> pinSource, string mapCode)
-        {
-            if (pinSource == null || string.IsNullOrWhiteSpace(mapCode))
-            {
-                return Enumerable.Empty<MapPin>();
-            }
-
-            var normalizedMapCode = NormalizeMapCode(mapCode);
-            if (string.IsNullOrWhiteSpace(normalizedMapCode))
-            {
-                return Enumerable.Empty<MapPin>();
-            }
-
-            IList<MapPin> pins;
-            if (pinSource.TryGetValue(normalizedMapCode, out pins) && pins != null)
-            {
-                return pins.Where(x => x != null);
-            }
-
-            var merged = pinSource
-                .Where(x => string.Equals(NormalizeMapCode(x.Key), normalizedMapCode, StringComparison.OrdinalIgnoreCase))
-                .SelectMany(x => x.Value ?? Enumerable.Empty<MapPin>())
-                .Where(x => x != null)
-                .ToList();
-            if (!merged.Any())
-            {
-                return Enumerable.Empty<MapPin>();
-            }
-
-            return merged;
-        }
-
-        private static string NormalizeMapCode(string mapCode)
-        {
-            if (string.IsNullOrWhiteSpace(mapCode))
-            {
-                return null;
-            }
-
-            var normalized = mapCode.Trim().Replace('/', '\\');
-            try
-            {
-                return Path.GetFileName(normalized);
-            }
-            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
-            {
-                return normalized;
-            }
         }
 
         private void RefreshStairListFromLatest()
@@ -954,95 +869,10 @@ namespace CgStairFinder
                 return;
             }
 
-            var action = string.Empty;
-            using (var form = new Form())
-            using (var table = new TableLayoutPanel())
-            using (var labelCoord = new Label())
-            using (var labelTitle = new Label())
-            using (var textDetail = new TextBox())
-            using (var buttonPanel = new FlowLayoutPanel())
-            using (var buttonDelete = new Button())
-            using (var buttonSaveLocal = new Button())
-            using (var buttonClose = new Button())
+            var action = PinDetailDialog.Show(this, Font, pin, isShared);
+            if (action == PinDetailDialogAction.SaveLocal)
             {
-                form.Text = isShared ? "共有ピン" : "ローカルピン";
-                form.StartPosition = FormStartPosition.CenterParent;
-                form.FormBorderStyle = FormBorderStyle.FixedDialog;
-                form.MinimizeBox = false;
-                form.MaximizeBox = false;
-                form.ClientSize = new Size(420, 250);
-                form.Font = Font;
-
-                table.Dock = DockStyle.Fill;
-                table.Padding = new Padding(10);
-                table.ColumnCount = 1;
-                table.RowCount = 4;
-                table.RowStyles.Add(new RowStyle());
-                table.RowStyles.Add(new RowStyle());
-                table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-                table.RowStyles.Add(new RowStyle());
-
-                labelCoord.AutoSize = true;
-                labelCoord.Text = string.Format("座標: 東{0}、南{1}", pin.East, pin.South);
-                table.Controls.Add(labelCoord, 0, 0);
-
-                labelTitle.AutoSize = true;
-                labelTitle.Margin = new Padding(3, 6, 3, 3);
-                labelTitle.Text = string.Format("タイトル: {0}", pin.Title);
-                table.Controls.Add(labelTitle, 0, 1);
-
-                textDetail.Multiline = true;
-                textDetail.ReadOnly = true;
-                textDetail.ScrollBars = ScrollBars.Vertical;
-                textDetail.Dock = DockStyle.Fill;
-                textDetail.Text = string.IsNullOrWhiteSpace(pin.Detail) ? "（詳細なし）" : pin.Detail;
-                table.Controls.Add(textDetail, 0, 2);
-
-                buttonPanel.Dock = DockStyle.Fill;
-                buttonPanel.FlowDirection = FlowDirection.RightToLeft;
-                buttonPanel.WrapContents = false;
-
-                buttonClose.Text = "閉じる";
-                buttonClose.Width = 88;
-                buttonClose.DialogResult = DialogResult.Cancel;
-
-                buttonDelete.Text = "削除";
-                buttonDelete.Width = 88;
-                buttonDelete.Click += (s, e) =>
-                {
-                    action = "delete";
-                    form.DialogResult = DialogResult.OK;
-                    form.Close();
-                };
-
-                buttonPanel.Controls.Add(buttonClose);
-                if (isShared)
-                {
-                    buttonSaveLocal.Text = "ローカル保存";
-                    buttonSaveLocal.Width = 104;
-                    buttonSaveLocal.Click += (s, e) =>
-                    {
-                        action = "save-local";
-                        form.DialogResult = DialogResult.OK;
-                        form.Close();
-                    };
-                    buttonPanel.Controls.Add(buttonSaveLocal);
-                }
-                buttonPanel.Controls.Add(buttonDelete);
-                table.Controls.Add(buttonPanel, 0, 3);
-
-                form.Controls.Add(table);
-                form.CancelButton = buttonClose;
-
-                if (form.ShowDialog(this) != DialogResult.OK)
-                {
-                    return;
-                }
-            }
-
-            if (string.Equals(action, "save-local", StringComparison.Ordinal))
-            {
-                var normalizedMapCode = NormalizeMapCode(mapCode);
+                var normalizedMapCode = MapPinCollectionService.NormalizeMapCode(mapCode);
                 if (string.IsNullOrWhiteSpace(normalizedMapCode))
                 {
                     MessageBox.Show(
@@ -1066,14 +896,14 @@ namespace CgStairFinder
                     return;
                 }
 
-                AddOrUpdateLocalPin(normalizedMapCode, normalizedPin);
+                MapPinCollectionService.AddOrUpdatePin(localPins, normalizedMapCode, normalizedPin);
                 SaveLocalPins();
                 RefreshStairListFromLatest();
                 RefreshMiniMap();
                 return;
             }
 
-            if (!string.Equals(action, "delete", StringComparison.Ordinal))
+            if (action != PinDetailDialogAction.Delete)
             {
                 return;
             }
@@ -1100,75 +930,9 @@ namespace CgStairFinder
 
         private bool TryDeletePin(string mapCode, MapPin pin, bool isShared)
         {
-            mapCode = NormalizeMapCode(mapCode);
+            mapCode = MapPinCollectionService.NormalizeMapCode(mapCode);
             var source = isShared ? sharedPins : localPins;
-            return RemovePin(source, mapCode, pin);
-        }
-
-        private static bool RemovePin(IDictionary<string, IList<MapPin>> source, string mapCode, MapPin pin)
-        {
-            if (source == null || string.IsNullOrWhiteSpace(mapCode) || pin == null)
-            {
-                return false;
-            }
-
-            IList<MapPin> pins;
-            if (!source.TryGetValue(mapCode, out pins) || pins == null || pins.Count == 0)
-            {
-                return false;
-            }
-
-            var index = -1;
-            for (var i = 0; i < pins.Count; i++)
-            {
-                var candidate = pins[i];
-                if (candidate == null)
-                {
-                    continue;
-                }
-
-                if (candidate.East == pin.East &&
-                    candidate.South == pin.South &&
-                    string.Equals(candidate.Title, pin.Title, StringComparison.Ordinal) &&
-                    string.Equals(candidate.Detail ?? string.Empty, pin.Detail ?? string.Empty, StringComparison.Ordinal))
-                {
-                    index = i;
-                    break;
-                }
-            }
-
-            if (index < 0)
-            {
-                for (var i = 0; i < pins.Count; i++)
-                {
-                    var candidate = pins[i];
-                    if (candidate == null)
-                    {
-                        continue;
-                    }
-
-                    if (candidate.East == pin.East &&
-                        candidate.South == pin.South &&
-                        string.Equals(candidate.Title, pin.Title, StringComparison.Ordinal))
-                    {
-                        index = i;
-                        break;
-                    }
-                }
-            }
-
-            if (index < 0)
-            {
-                return false;
-            }
-
-            pins.RemoveAt(index);
-            if (pins.Count == 0)
-            {
-                source.Remove(mapCode);
-            }
-
-            return true;
+            return MapPinCollectionService.RemovePin(source, mapCode, pin);
         }
 
         private void Button2_Click(object sender, EventArgs e)
@@ -1233,7 +997,7 @@ namespace CgStairFinder
                 initialSouth = latestSouth ?? 0;
             }
 
-            mapCode = NormalizeMapCode(mapCode);
+            mapCode = MapPinCollectionService.NormalizeMapCode(mapCode);
 
             if (string.IsNullOrWhiteSpace(mapCode))
             {
@@ -1247,12 +1011,12 @@ namespace CgStairFinder
             }
 
             MapPin newPin;
-            if (!TryShowCreatePinDialog(mapCode, initialEast, initialSouth, out newPin))
+            if (!PinCreateDialog.TryShow(this, Font, mapCode, initialEast, initialSouth, out newPin))
             {
                 return;
             }
 
-            AddOrUpdateLocalPin(mapCode, newPin);
+            MapPinCollectionService.AddOrUpdatePin(localPins, mapCode, newPin);
             SaveLocalPins();
             RefreshStairListFromLatest();
         }
@@ -1308,7 +1072,7 @@ namespace CgStairFinder
                         return;
                     }
 
-                    if (!RemovePin(localPins, selected.MapCode, selected.Pin))
+                    if (!MapPinCollectionService.RemovePin(localPins, selected.MapCode, selected.Pin))
                     {
                         MessageBox.Show(
                             form,
@@ -1366,20 +1130,7 @@ namespace CgStairFinder
 
         private IEnumerable<LocalPinManagerItem> GetLocalPinManagerItems()
         {
-            return localPins
-                .SelectMany(x =>
-                    (x.Value ?? Enumerable.Empty<MapPin>())
-                    .Where(p => p != null)
-                    .Select(p => new LocalPinManagerItem
-                    {
-                        MapCode = NormalizeMapCode(x.Key),
-                        Pin = p
-                    }))
-                .OrderBy(x => x.MapCode)
-                .ThenBy(x => x.Pin?.East ?? 0)
-                .ThenBy(x => x.Pin?.South ?? 0)
-                .ThenBy(x => x.Pin?.Title ?? string.Empty)
-                .ToList();
+            return MapPinCollectionService.BuildLocalPinManagerItems(localPins);
         }
 
         private bool TryGetCurrentMapContext(out string mapCode, out int east, out int south)
@@ -1435,169 +1186,6 @@ namespace CgStairFinder
             return !string.IsNullOrWhiteSpace(mapCode) && latestEast.HasValue && latestSouth.HasValue;
         }
 
-        private bool TryShowCreatePinDialog(string mapCode, int initialEast, int initialSouth, out MapPin pin)
-        {
-            pin = null;
-
-            using (var form = new Form())
-            using (var table = new TableLayoutPanel())
-            using (var labelMap = new Label())
-            using (var labelEast = new Label())
-            using (var labelSouth = new Label())
-            using (var labelTitle = new Label())
-            using (var labelDetail = new Label())
-            using (var inputEast = new NumericUpDown())
-            using (var inputSouth = new NumericUpDown())
-            using (var inputTitle = new TextBox())
-            using (var inputDetail = new TextBox())
-            using (var buttons = new FlowLayoutPanel())
-            using (var buttonOk = new Button())
-            using (var buttonCancel = new Button())
-            {
-                form.Text = "ピンを追加";
-                form.StartPosition = FormStartPosition.CenterParent;
-                form.FormBorderStyle = FormBorderStyle.FixedDialog;
-                form.MinimizeBox = false;
-                form.MaximizeBox = false;
-                form.ClientSize = new Size(420, 280);
-                form.Font = Font;
-
-                table.Dock = DockStyle.Fill;
-                table.Padding = new Padding(10);
-                table.ColumnCount = 2;
-                table.RowCount = 6;
-                table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
-                table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-                table.RowStyles.Add(new RowStyle());
-                table.RowStyles.Add(new RowStyle());
-                table.RowStyles.Add(new RowStyle());
-                table.RowStyles.Add(new RowStyle());
-                table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-                table.RowStyles.Add(new RowStyle());
-
-                labelMap.Text = string.Format("マップ: {0}", mapCode);
-                labelMap.AutoSize = true;
-                labelMap.Dock = DockStyle.Fill;
-                table.Controls.Add(labelMap, 0, 0);
-                table.SetColumnSpan(labelMap, 2);
-
-                labelEast.Text = "東";
-                labelEast.TextAlign = ContentAlignment.MiddleLeft;
-                labelEast.Dock = DockStyle.Fill;
-                inputEast.Minimum = 0;
-                inputEast.Maximum = 9999;
-                inputEast.Value = Math.Min(9999, Math.Max(0, initialEast));
-                inputEast.Width = 120;
-                table.Controls.Add(labelEast, 0, 1);
-                table.Controls.Add(inputEast, 1, 1);
-
-                labelSouth.Text = "南";
-                labelSouth.TextAlign = ContentAlignment.MiddleLeft;
-                labelSouth.Dock = DockStyle.Fill;
-                inputSouth.Minimum = 0;
-                inputSouth.Maximum = 9999;
-                inputSouth.Value = Math.Min(9999, Math.Max(0, initialSouth));
-                inputSouth.Width = 120;
-                table.Controls.Add(labelSouth, 0, 2);
-                table.Controls.Add(inputSouth, 1, 2);
-
-                labelTitle.AutoSize = true;
-                labelTitle.Text = "タイトル\r\n(5文字)";
-                labelTitle.TextAlign = ContentAlignment.MiddleLeft;
-                labelTitle.Dock = DockStyle.Fill;
-                inputTitle.MaxLength = 5;
-                inputTitle.Dock = DockStyle.Fill;
-                table.Controls.Add(labelTitle, 0, 3);
-                table.Controls.Add(inputTitle, 1, 3);
-
-                labelDetail.Text = "詳細";
-                labelDetail.TextAlign = ContentAlignment.MiddleLeft;
-                labelDetail.Dock = DockStyle.Fill;
-                inputDetail.Multiline = true;
-                inputDetail.ScrollBars = ScrollBars.Vertical;
-                inputDetail.Dock = DockStyle.Fill;
-                table.Controls.Add(labelDetail, 0, 4);
-                table.Controls.Add(inputDetail, 1, 4);
-
-                buttons.Dock = DockStyle.Fill;
-                buttons.FlowDirection = FlowDirection.RightToLeft;
-                buttons.WrapContents = false;
-
-                buttonOk.Text = "保存";
-                buttonOk.Width = 88;
-                buttonOk.DialogResult = DialogResult.OK;
-
-                buttonCancel.Text = "キャンセル";
-                buttonCancel.Width = 88;
-                buttonCancel.DialogResult = DialogResult.Cancel;
-
-                buttons.Controls.Add(buttonOk);
-                buttons.Controls.Add(buttonCancel);
-                table.Controls.Add(buttons, 0, 5);
-                table.SetColumnSpan(buttons, 2);
-
-                form.Controls.Add(table);
-                form.AcceptButton = buttonOk;
-                form.CancelButton = buttonCancel;
-
-                if (form.ShowDialog(this) != DialogResult.OK)
-                {
-                    return false;
-                }
-
-                var normalized = MapPin.Normalize(new MapPin
-                {
-                    East = (int)inputEast.Value,
-                    South = (int)inputSouth.Value,
-                    Title = inputTitle.Text,
-                    Detail = inputDetail.Text
-                });
-
-                if (normalized == null)
-                {
-                    MessageBox.Show(
-                        this,
-                        "タイトルを1〜5文字で入力してください。",
-                        "メッセージ",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                    return false;
-                }
-
-                pin = normalized;
-                return true;
-            }
-        }
-
-        private void AddOrUpdateLocalPin(string mapCode, MapPin pin)
-        {
-            mapCode = NormalizeMapCode(mapCode);
-            if (string.IsNullOrWhiteSpace(mapCode) || pin == null)
-            {
-                return;
-            }
-
-            IList<MapPin> mapPins;
-            if (!localPins.TryGetValue(mapCode, out mapPins) || mapPins == null)
-            {
-                mapPins = new List<MapPin>();
-                localPins[mapCode] = mapPins;
-            }
-
-            var existing = mapPins.FirstOrDefault(x =>
-                x != null &&
-                x.East == pin.East &&
-                x.South == pin.South &&
-                string.Equals(x.Title, pin.Title, StringComparison.Ordinal));
-            if (existing == null)
-            {
-                mapPins.Add(pin);
-                return;
-            }
-
-            existing.Detail = pin.Detail;
-        }
-
         private void Button5_Click(object sender, EventArgs e)
         {
             var candidates = BuildShareCandidates();
@@ -1607,14 +1195,15 @@ namespace CgStairFinder
                 return;
             }
 
-            List<DetectLog> selectedLogs;
-            bool includeMapFiles;
-            bool includePins;
-            if (!TrySelectShareLogs(candidates, out selectedLogs, out includeMapFiles, out includePins))
+            ShareSelectionResult selection;
+            if (!ShareSelectionDialog.TryShow(this, Font, candidates, out selection))
             {
                 return;
             }
 
+            var selectedLogs = selection.SelectedLogs ?? new List<DetectLog>();
+            var includeMapFiles = selection.IncludeMapFiles;
+            var includePins = selection.IncludePins;
             if (!selectedLogs.Any())
             {
                 MessageBox.Show(
@@ -2059,8 +1648,8 @@ namespace CgStairFinder
             }
 
             var result = new List<MapPin>();
-            result.AddRange(GetMapPins(localPins, mapCode));
-            result.AddRange(GetMapPins(sharedPins, mapCode));
+            result.AddRange(MapPinCollectionService.GetMapPins(localPins, mapCode));
+            result.AddRange(MapPinCollectionService.GetMapPins(sharedPins, mapCode));
 
             return result
                 .Select(MapPin.Normalize)
@@ -2068,318 +1657,6 @@ namespace CgStairFinder
                 .GroupBy(x => string.Format("{0}:{1}:{2}:{3}", x.East, x.South, x.Title, x.Detail), StringComparer.Ordinal)
                 .Select(g => g.First())
                 .ToList();
-        }
-
-        private bool TrySelectShareLogs(
-            IList<ShareLogItem> candidates,
-            out List<DetectLog> selectedLogs,
-            out bool includeMapFiles,
-            out bool includePins)
-        {
-            selectedLogs = new List<DetectLog>();
-            includeMapFiles = false;
-            includePins = false;
-
-            using (var form = new Form())
-            using (var label = new Label())
-            using (var filterPanel = new FlowLayoutPanel())
-            using (var labelRecent = new Label())
-            using (var inputRecentHours = new NumericUpDown())
-            using (var labelRecentSuffix = new Label())
-            using (var labelKeyword = new Label())
-            using (var inputKeyword = new ComboBox())
-            using (var buttonSelectVisible = new Button())
-            using (var buttonUnselectVisible = new Button())
-            using (var labelStatus = new Label())
-            using (var checkedList = new CheckedListBox())
-            using (var checkIncludeMapFiles = new CheckBox())
-            using (var checkIncludePins = new CheckBox())
-            using (var buttonOk = new Button())
-            using (var buttonCancel = new Button())
-            {
-                form.Text = "\u5171\u6709\u5BFE\u8C61\u306E\u9078\u629E";
-                form.StartPosition = FormStartPosition.CenterParent;
-                form.FormBorderStyle = FormBorderStyle.SizableToolWindow;
-                form.MinimizeBox = false;
-                form.MaximizeBox = false;
-                form.ClientSize = new Size(520, 420);
-                form.MinimumSize = new Size(460, 320);
-                form.Font = Font;
-
-                label.AutoSize = false;
-                label.Dock = DockStyle.Top;
-                label.Height = 36;
-                label.Padding = new Padding(8, 6, 8, 0);
-                label.TextAlign = ContentAlignment.MiddleLeft;
-                label.Text = "\u5171\u6709\u3059\u308B\u30DE\u30C3\u30D7\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-
-                filterPanel.AutoSize = false;
-                filterPanel.Dock = DockStyle.Top;
-                filterPanel.Height = 58;
-                filterPanel.Padding = new Padding(8, 2, 8, 2);
-                filterPanel.FlowDirection = FlowDirection.LeftToRight;
-                filterPanel.WrapContents = true;
-
-                labelRecent.AutoSize = true;
-                labelRecent.Margin = new Padding(0, 8, 4, 0);
-                labelRecent.Text = "\u76F4\u8FD1";
-
-                inputRecentHours.Minimum = 0;
-                inputRecentHours.Maximum = 999;
-                inputRecentHours.Value = 0;
-                inputRecentHours.Width = 60;
-                inputRecentHours.Margin = new Padding(0, 4, 4, 0);
-
-                labelRecentSuffix.AutoSize = true;
-                labelRecentSuffix.Margin = new Padding(0, 8, 10, 0);
-                labelRecentSuffix.Text = "\u5206\u4EE5\u5185";
-
-                labelKeyword.AutoSize = true;
-                labelKeyword.Margin = new Padding(0, 8, 4, 0);
-                labelKeyword.Text = "\u30DE\u30C3\u30D7\u540D";
-
-                inputKeyword.DropDownStyle = ComboBoxStyle.DropDown;
-                inputKeyword.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
-                inputKeyword.AutoCompleteSource = AutoCompleteSource.ListItems;
-                inputKeyword.Width = 180;
-                inputKeyword.Margin = new Padding(0, 4, 10, 0);
-                foreach (var candidate in BuildMapNameKeywordCandidates(candidates))
-                {
-                    inputKeyword.Items.Add(candidate);
-                }
-
-                buttonSelectVisible.Text = "\u5168\u9078\u629E";
-                buttonSelectVisible.Width = 72;
-                buttonSelectVisible.Margin = new Padding(0, 3, 4, 0);
-
-                buttonUnselectVisible.Text = "\u5168\u89E3\u9664";
-                buttonUnselectVisible.Width = 72;
-                buttonUnselectVisible.Margin = new Padding(0, 3, 0, 0);
-
-                filterPanel.Controls.Add(labelRecent);
-                filterPanel.Controls.Add(inputRecentHours);
-                filterPanel.Controls.Add(labelRecentSuffix);
-                filterPanel.Controls.Add(labelKeyword);
-                filterPanel.Controls.Add(inputKeyword);
-                filterPanel.Controls.Add(buttonSelectVisible);
-                filterPanel.Controls.Add(buttonUnselectVisible);
-
-                labelStatus.AutoSize = false;
-                labelStatus.Dock = DockStyle.Top;
-                labelStatus.Height = 22;
-                labelStatus.Padding = new Padding(8, 0, 8, 0);
-                labelStatus.TextAlign = ContentAlignment.MiddleLeft;
-                labelStatus.ForeColor = Color.FromArgb(100, 116, 139);
-
-                checkedList.Dock = DockStyle.Fill;
-                checkedList.CheckOnClick = true;
-                checkedList.HorizontalScrollbar = true;
-
-                checkIncludeMapFiles.AutoSize = true;
-                checkIncludeMapFiles.Dock = DockStyle.Bottom;
-                checkIncludeMapFiles.Padding = new Padding(8, 4, 8, 2);
-                checkIncludeMapFiles.Text = "選択したマップの .dat も同梱する（ファイルサイズ増）";
-                checkIncludeMapFiles.Checked = false;
-
-                checkIncludePins.AutoSize = true;
-                checkIncludePins.Dock = DockStyle.Bottom;
-                checkIncludePins.Padding = new Padding(8, 2, 8, 2);
-                checkIncludePins.Text = "ピン情報も共有する";
-                checkIncludePins.Checked = false;
-
-                var buttonPanel = new FlowLayoutPanel
-                {
-                    Dock = DockStyle.Bottom,
-                    Height = 42,
-                    FlowDirection = FlowDirection.RightToLeft,
-                    Padding = new Padding(8, 6, 8, 6)
-                };
-
-                buttonOk.Text = "\u6B21\u3078";
-                buttonOk.Width = 88;
-                buttonOk.DialogResult = DialogResult.OK;
-
-                buttonCancel.Text = "\u30AD\u30E3\u30F3\u30BB\u30EB";
-                buttonCancel.Width = 88;
-                buttonCancel.DialogResult = DialogResult.Cancel;
-
-                buttonPanel.Controls.Add(buttonOk);
-                buttonPanel.Controls.Add(buttonCancel);
-
-                var checkedState = candidates.ToDictionary(x => x, x => true);
-                var isRefreshing = false;
-
-                Func<ShareLogItem, bool> matchFilter = item =>
-                {
-                    if (item == null || item.Log == null)
-                    {
-                        return false;
-                    }
-
-                    var hours = (int)inputRecentHours.Value;
-                    if (hours > 0)
-                    {
-                        var threshold = DateTime.Now.AddMinutes(-hours);
-                        if (item.Log.DetectTime < threshold)
-                        {
-                            return false;
-                        }
-                    }
-
-                    var keyword = (inputKeyword.Text ?? string.Empty).Trim();
-                    if (!string.IsNullOrWhiteSpace(keyword))
-                    {
-                        var mapName = item.Log.MapName ?? string.Empty;
-                        if (mapName.IndexOf(keyword, StringComparison.CurrentCultureIgnoreCase) < 0)
-                        {
-                            return false;
-                        }
-                    }
-
-                    return true;
-                };
-
-                Action refreshVisibleItems = () =>
-                {
-                    isRefreshing = true;
-                    try
-                    {
-                        for (var i = 0; i < checkedList.Items.Count; i++)
-                        {
-                            var existing = checkedList.Items[i] as ShareLogItem;
-                            if (existing != null)
-                            {
-                                checkedState[existing] = checkedList.GetItemChecked(i);
-                            }
-                        }
-
-                        checkedList.Items.Clear();
-                        var visibleCount = 0;
-                        foreach (var candidate in candidates)
-                        {
-                            if (!matchFilter(candidate))
-                            {
-                                continue;
-                            }
-
-                            visibleCount++;
-                            bool isChecked;
-                            if (!checkedState.TryGetValue(candidate, out isChecked))
-                            {
-                                isChecked = true;
-                                checkedState[candidate] = true;
-                            }
-
-                            checkedList.Items.Add(candidate, isChecked);
-                        }
-
-                        var selectedCount = checkedState.Count(x => x.Value);
-                        labelStatus.Text = string.Format(
-                            "\u8868\u793A: {0} / \u5168\u4EF6: {1}    \u9078\u629E: {2}",
-                            visibleCount,
-                            candidates.Count,
-                            selectedCount);
-                    }
-                    finally
-                    {
-                        isRefreshing = false;
-                    }
-                };
-
-                checkedList.ItemCheck += (s, e) =>
-                {
-                    if (isRefreshing || e.Index < 0 || e.Index >= checkedList.Items.Count)
-                    {
-                        return;
-                    }
-
-                    var item = checkedList.Items[e.Index] as ShareLogItem;
-                    if (item == null)
-                    {
-                        return;
-                    }
-
-                    checkedState[item] = e.NewValue == CheckState.Checked;
-                    form.BeginInvoke((Action)refreshVisibleItems);
-                };
-
-                inputRecentHours.ValueChanged += (s, e) => refreshVisibleItems();
-                inputKeyword.TextChanged += (s, e) => refreshVisibleItems();
-
-                buttonSelectVisible.Click += (s, e) =>
-                {
-                    foreach (var item in checkedList.Items.Cast<ShareLogItem>())
-                    {
-                        checkedState[item] = true;
-                    }
-
-                    refreshVisibleItems();
-                };
-
-                buttonUnselectVisible.Click += (s, e) =>
-                {
-                    foreach (var item in checkedList.Items.Cast<ShareLogItem>())
-                    {
-                        checkedState[item] = false;
-                    }
-
-                    refreshVisibleItems();
-                };
-
-                form.Controls.Add(checkedList);
-                form.Controls.Add(checkIncludePins);
-                form.Controls.Add(checkIncludeMapFiles);
-                form.Controls.Add(buttonPanel);
-                form.Controls.Add(labelStatus);
-                form.Controls.Add(filterPanel);
-                form.Controls.Add(label);
-                form.AcceptButton = buttonOk;
-                form.CancelButton = buttonCancel;
-                refreshVisibleItems();
-
-                if (form.ShowDialog(this) != DialogResult.OK)
-                {
-                    return false;
-                }
-
-                selectedLogs = candidates
-                    .Where(x => checkedState.ContainsKey(x) && checkedState[x])
-                    .Select(x => x.Log)
-                    .ToList();
-                includeMapFiles = checkIncludeMapFiles.Checked;
-                includePins = checkIncludePins.Checked;
-                return true;
-            }
-        }
-
-        private static IEnumerable<string> BuildMapNameKeywordCandidates(IList<ShareLogItem> candidates)
-        {
-            if (candidates == null || candidates.Count == 0)
-            {
-                return Enumerable.Empty<string>();
-            }
-
-            return candidates
-                .Where(x => x?.Log != null && !string.IsNullOrWhiteSpace(x.Log.MapName))
-                .Select(x => RemoveDigitsFromMapName(x.Log.MapName))
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .GroupBy(x => x, StringComparer.CurrentCultureIgnoreCase)
-                .Where(g => g.Count() >= 5)
-                .OrderByDescending(g => g.Count())
-                .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
-                .Select(g => g.Key)
-                .ToList();
-        }
-
-        private static string RemoveDigitsFromMapName(string mapName)
-        {
-            if (string.IsNullOrWhiteSpace(mapName))
-            {
-                return string.Empty;
-            }
-
-            var chars = mapName.Where(ch => !char.IsDigit(ch)).ToArray();
-            return new string(chars).Trim();
         }
 
         private void Button7_Click(object sender, EventArgs e)

@@ -78,14 +78,18 @@
     <Compile Include="Defined.cs" />
     <Compile Include="DetectLog.cs" />
     <Compile Include="HistoryShareService.cs" />
+    <Compile Include="LocalPinManagerItem.cs" />
     <Compile Include="LocalPinStore.cs" />
     <Compile Include="Main.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="MapPinCollectionService.cs" />
     <Compile Include="MapPin.cs" />
     <Compile Include="Main.Designer.cs">
       <DependentUpon>Main.cs</DependentUpon>
     </Compile>
+    <Compile Include="PinCreateDialog.cs" />
+    <Compile Include="PinDetailDialog.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Settings.Designer.cs">
@@ -94,6 +98,8 @@
       <DependentUpon>Settings.settings</DependentUpon>
     </Compile>
     <Compile Include="MiniMapRenderer.cs" />
+    <Compile Include="ShareLogItem.cs" />
+    <Compile Include="ShareSelectionDialog.cs" />
     <Compile Include="StairFinder.cs" />
     <EmbeddedResource Include="Main.resx">
       <DependentUpon>Main.cs</DependentUpon>
