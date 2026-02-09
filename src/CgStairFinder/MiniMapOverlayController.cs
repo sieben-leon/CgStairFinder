@@ -9,6 +9,8 @@ namespace CgStairFinder
         private const int OverlayClickThreshold = 4;
 
         private readonly Font listFont;
+        private readonly int listItemHeight;
+        private readonly DrawItemEventHandler listDrawItemHandler;
 
         private Form overlayForm;
         private PictureBox overlayPictureBox;
@@ -17,13 +19,16 @@ namespace CgStairFinder
         private bool overlayMoved;
         private Point overlayDragStartCursor;
         private Point overlayDragStartForm;
+        private Point? lastOverlayLocation;
 
         public event EventHandler RestoreRequested;
         public event EventHandler OverlayClosed;
 
-        public MiniMapOverlayController(Font listFont)
+        public MiniMapOverlayController(Font listFont, int listItemHeight, DrawItemEventHandler listDrawItemHandler)
         {
             this.listFont = listFont ?? SystemFonts.DefaultFont;
+            this.listItemHeight = Math.Max(14, listItemHeight);
+            this.listDrawItemHandler = listDrawItemHandler;
         }
 
         public bool IsActive
@@ -95,7 +100,7 @@ namespace CgStairFinder
             {
                 foreach (var item in items)
                 {
-                    overlayListBox.Items.Add(item == null ? string.Empty : item.ToString());
+                    overlayListBox.Items.Add(item);
                 }
             }
 
@@ -136,8 +141,15 @@ namespace CgStairFinder
                 IntegralHeight = false,
                 BackColor = Color.FromArgb(249, 251, 255),
                 BorderStyle = BorderStyle.None,
-                Font = listFont
+                Font = listFont,
+                DrawMode = listDrawItemHandler == null ? DrawMode.Normal : DrawMode.OwnerDrawFixed,
+                ItemHeight = listItemHeight
             };
+            if (listDrawItemHandler != null)
+            {
+                overlayListBox.DrawItem += listDrawItemHandler;
+            }
+
             overlayListBox.MouseDown += OverlayMouseDown;
             overlayListBox.MouseMove += OverlayMouseMove;
             overlayListBox.MouseUp += OverlayMouseUp;
@@ -174,7 +186,11 @@ namespace CgStairFinder
             overlayForm.MouseUp += OverlayMouseUp;
             overlayForm.FormClosed += OverlayForm_FormClosed;
 
-            if (sourcePictureBox != null)
+            if (lastOverlayLocation.HasValue)
+            {
+                overlayForm.Location = lastOverlayLocation.Value;
+            }
+            else if (sourcePictureBox != null)
             {
                 var miniMapScreenPos = sourcePictureBox.PointToScreen(Point.Empty);
                 overlayForm.Location = new Point(miniMapScreenPos.X + 18, miniMapScreenPos.Y + 18);
@@ -183,6 +199,11 @@ namespace CgStairFinder
 
         private void OverlayForm_FormClosed(object sender, FormClosedEventArgs e)
         {
+            if (overlayForm != null && !overlayForm.IsDisposed)
+            {
+                lastOverlayLocation = overlayForm.Location;
+            }
+
             overlayDragging = false;
             overlayMoved = false;
 

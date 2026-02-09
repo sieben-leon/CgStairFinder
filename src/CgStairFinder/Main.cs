@@ -98,7 +98,7 @@ namespace CgStairFinder
                 return;
             }
 
-            miniMapOverlayController = new MiniMapOverlayController(listBox1.Font);
+            miniMapOverlayController = new MiniMapOverlayController(listBox1.Font, listBox1.ItemHeight, ListBox_DrawItem);
             miniMapOverlayController.RestoreRequested += MiniMapOverlayController_RestoreRequested;
             miniMapOverlayController.OverlayClosed += MiniMapOverlayController_OverlayClosed;
         }
