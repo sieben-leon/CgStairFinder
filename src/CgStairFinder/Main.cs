@@ -951,6 +951,8 @@ namespace CgStairFinder
             var isSelectedWindow = comboBox1.SelectedIndex > 0;
             int? east = null;
             int? south = null;
+            int? mapPathOffset = null;
+            var usedLatestMapFallback = false;
 
             try
             {
@@ -971,14 +973,8 @@ namespace CgStairFinder
 
                     mapName = snapshot.MapName;
                     mapFile = snapshot.MapFile;
-                    if ((mapFile == null || !mapFile.Exists) && !string.IsNullOrWhiteSpace(latestMapPath))
-                    {
-                        var fallbackFile = new FileInfo(latestMapPath);
-                        if (fallbackFile.Exists)
-                        {
-                            mapFile = fallbackFile;
-                        }
-                    }
+                    mapPathOffset = snapshot.MapPathOffset;
+                    usedLatestMapFallback = snapshot.UsedLatestMapFallback;
                     east = snapshot.East;
                     south = snapshot.South;
                 }
@@ -991,17 +987,11 @@ namespace CgStairFinder
                 {
                     if (isSelectedWindow)
                     {
-                        if (string.IsNullOrWhiteSpace(latestMapPath))
+                        var latestFile = CgClientReader.GetLatestMapFile(Settings.Default.cgDir);
+                        if (latestFile != null && latestFile.Exists)
                         {
-                            var initialFallback = CgClientReader.GetLatestMapFile(Settings.Default.cgDir);
-                            if (initialFallback != null && initialFallback.Exists)
-                            {
-                                mapFile = initialFallback;
-                            }
-                            else
-                            {
-                                return;
-                            }
+                            mapFile = latestFile;
+                            usedLatestMapFallback = true;
                         }
                         else
                         {
@@ -1019,10 +1009,11 @@ namespace CgStairFinder
                 var currentMapRelativePath = GetRelativeMapPath(mapFile);
                 var previousMapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
                 var mapChanged = !string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase);
+                var mapPathStatusLabel = BuildMapPathStatusLabel(isSelectedWindow, usedLatestMapFallback, mapPathOffset);
 
                 mapName = ResolveMapNameForCurrentMap(currentMapCode, mapName, previousMapCode, mapChanged, isSelectedWindow);
                 Text = string.IsNullOrWhiteSpace(mapName) ? currentMapCode : mapName;
-                SetMapPathLabel(currentMapPath);
+                SetMapPathLabel(currentMapPath, mapPathStatusLabel);
 
                 var mapData = new CgMapStairFinder(mapFile).GetMapData();
                 if (mapChanged)
@@ -1069,19 +1060,42 @@ namespace CgStairFinder
             }
         }
 
-        private void SetMapPathLabel(string fullPath)
+        private static string BuildMapPathStatusLabel(bool isSelectedWindow, bool usedLatestMapFallback, int? mapPathOffset)
         {
-            label2.Text = fullPath;
-            if (label2.Text.Length <= 18)
+            if (!isSelectedWindow)
+            {
+                return string.Empty;
+            }
+
+            if (usedLatestMapFallback)
+            {
+                return "(*)";
+            }
+
+            if (!mapPathOffset.HasValue || mapPathOffset.Value == 4)
+            {
+                return string.Empty;
+            }
+
+            var offset = mapPathOffset.Value;
+            return string.Format("({0}{1})", offset >= 0 ? "+" : string.Empty, offset);
+        }
+
+        private void SetMapPathLabel(string fullPath, string statusLabel)
+        {
+            var suffix = statusLabel ?? string.Empty;
+            var text = fullPath ?? string.Empty;
+            label2.Text = text + suffix;
+            if (label2.Text.Length <= 20)
             {
                 return;
             }
 
-            var c = fullPath.ToCharArray();
+            var c = text.ToCharArray();
             Array.Reverse(c);
             Array.Resize(ref c, 16);
             Array.Reverse(c);
-            label2.Text = string.Format("...{0}", new string(c));
+            label2.Text = string.Format("...{0}{1}", new string(c), suffix);
         }
 
         private void ListBox_DrawItem(object sender, DrawItemEventArgs e)

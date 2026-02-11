@@ -14,6 +14,10 @@ namespace CgStairFinder
 
         public FileInfo MapFile { get; set; }
 
+        public int? MapPathOffset { get; set; }
+
+        public bool UsedLatestMapFallback { get; set; }
+
         public int East { get; set; }
 
         public int South { get; set; }
@@ -24,10 +28,15 @@ namespace CgStairFinder
         private const int ProcessAccessAll = 0x1F0FFF;
         private const long AddressMapName = 0x95C870;
         private const long AddressMapPath = 0x18CCC8;
+        private const int MapPathBufferSize = 128;
+        private const int MapPathScanRangeBytes = 128;
         private const long AddressEast = 0x95C88C;
         private const long AddressSouth = 0x95C890;
 
         private static readonly Encoding CgMapNameEncoding = Encoding.GetEncoding(950);
+        private static readonly Dictionary<int, long> MapPathAddressByProcessId = new Dictionary<int, long>();
+        private static readonly HashSet<int> MapPathScanFailedProcessIds = new HashSet<int>();
+        private static readonly object MapPathAddressLock = new object();
 
         [DllImport("kernel32.dll")]
         private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int nSize, out IntPtr lpNumberOfBytesRead);
@@ -79,14 +88,9 @@ namespace CgStairFinder
                     return false;
                 }
 
-                var mapPathBuffer = new byte[32];
-                if (!TryReadProcessMemory(hProcess, AddressMapPath, mapPathBuffer))
-                {
-                    errorMessage = "\u30DE\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u30D1\u30B9\u3092\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3002";
-                    return false;
-                }
-
-                var mapFile = ResolveMapFile(cgDir, mapPathBuffer);
+                int? mapPathOffset;
+                bool usedLatestMapFallback;
+                var mapFile = ResolveMapFile(hProcess, process.Id, cgDir, out mapPathOffset, out usedLatestMapFallback);
 
                 var positionBuffer = new byte[4];
                 if (!TryReadProcessMemory(hProcess, AddressEast, positionBuffer))
@@ -107,6 +111,8 @@ namespace CgStairFinder
                 {
                     MapName = DecodeMapName(mapNameBuffer),
                     MapFile = mapFile,
+                    MapPathOffset = mapPathOffset,
+                    UsedLatestMapFallback = usedLatestMapFallback,
                     East = east,
                     South = south
                 };
@@ -130,66 +136,171 @@ namespace CgStairFinder
             return ReadProcessMemory(hProcess, new IntPtr(address), buffer, buffer.Length, out bytesRead);
         }
 
-        private static FileInfo ResolveMapFile(string cgDir, byte[] mapFileBuffer)
+        private static FileInfo ResolveMapFile(IntPtr hProcess, int processId, string cgDir, out int? mapPathOffset, out bool usedLatestMapFallback)
         {
-            var rawPath = NormalizePath(DecodeMapPath(mapFileBuffer));
-            if (string.IsNullOrWhiteSpace(rawPath))
+            mapPathOffset = null;
+            usedLatestMapFallback = false;
+
+            string rawPath;
+            long resolvedAddress;
+            if (!TryReadMapPath(hProcess, processId, out rawPath, out resolvedAddress))
             {
-                return null;
+                usedLatestMapFallback = true;
+                return GetLatestMapFile(cgDir);
             }
 
-            var candidates = new List<string>();
-            if (TryIsPathRooted(rawPath))
+            mapPathOffset = (int)(resolvedAddress - AddressMapPath);
+
+            var normalizedPath = NormalizePath(rawPath);
+            if (string.IsNullOrWhiteSpace(normalizedPath))
             {
-                candidates.Add(rawPath);
+                usedLatestMapFallback = true;
+                return GetLatestMapFile(cgDir);
+            }
+
+            string candidate = null;
+            if (TryIsPathRooted(normalizedPath))
+            {
+                candidate = normalizedPath;
             }
             else if (!string.IsNullOrWhiteSpace(cgDir))
             {
-                var pathWithoutLeadingSlash = rawPath.TrimStart('\\');
-                if (pathWithoutLeadingSlash.StartsWith("map\\", StringComparison.OrdinalIgnoreCase))
-                {
-                    var combinedFromMapRoot = TryCombine(cgDir, pathWithoutLeadingSlash);
-                    if (!string.IsNullOrWhiteSpace(combinedFromMapRoot))
-                    {
-                        candidates.Add(combinedFromMapRoot);
-                    }
-                }
-                else
-                {
-                    var combinedUnderMap = TryCombine(TryCombine(cgDir, "map"), pathWithoutLeadingSlash);
-                    if (!string.IsNullOrWhiteSpace(combinedUnderMap))
-                    {
-                        candidates.Add(combinedUnderMap);
-                    }
-                }
-
-                var combined = TryCombine(cgDir, rawPath);
-                if (!string.IsNullOrWhiteSpace(combined))
-                {
-                    candidates.Add(combined);
-                }
+                candidate = TryCombine(cgDir, normalizedPath.TrimStart('\\'));
             }
 
-            if (!string.IsNullOrWhiteSpace(cgDir))
+            var fileInfo = TryCreateFileInfo(candidate);
+            if (fileInfo != null && fileInfo.Exists)
             {
-                var pathWithoutLeadingSlash = rawPath.TrimStart('\\');
-                var combinedWithoutLeadingSlash = TryCombine(cgDir, pathWithoutLeadingSlash);
-                if (!string.IsNullOrWhiteSpace(combinedWithoutLeadingSlash))
-                {
-                    candidates.Add(combinedWithoutLeadingSlash);
-                }
+                return fileInfo;
             }
 
-            foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            usedLatestMapFallback = true;
+            return GetLatestMapFile(cgDir);
+        }
+
+        private static bool TryReadMapPath(IntPtr hProcess, int processId, out string mapPath, out long resolvedAddress)
+        {
+            mapPath = string.Empty;
+            resolvedAddress = 0;
+
+            var candidateAddresses = new List<long>();
+            long cachedAddress;
+            if (TryGetCachedMapPathAddress(processId, out cachedAddress))
             {
-                var file = TryCreateFileInfo(candidate);
-                if (file != null && file.Exists)
-                {
-                    return file;
-                }
+                candidateAddresses.Add(cachedAddress);
             }
 
-            return null;
+            candidateAddresses.Add(AddressMapPath + 4);
+            candidateAddresses.Add(AddressMapPath);
+
+            foreach (var address in candidateAddresses.Distinct())
+            {
+                if (!TryReadMapPathAtAddress(hProcess, address, out mapPath))
+                {
+                    continue;
+                }
+
+                SaveCachedMapPathAddress(processId, address);
+                resolvedAddress = address;
+                return true;
+            }
+
+            if (HasScanFailed(processId))
+            {
+                return false;
+            }
+
+            for (var address = AddressMapPath - MapPathScanRangeBytes; address <= AddressMapPath + MapPathScanRangeBytes; address++)
+            {
+                if (!TryReadMapPathAtAddress(hProcess, address, out mapPath))
+                {
+                    continue;
+                }
+
+                SaveCachedMapPathAddress(processId, address);
+                resolvedAddress = address;
+                return true;
+            }
+
+            MarkScanFailed(processId);
+            return false;
+        }
+
+        private static bool TryReadMapPathAtAddress(IntPtr hProcess, long address, out string mapPath)
+        {
+            mapPath = string.Empty;
+            var buffer = new byte[MapPathBufferSize];
+            if (!TryReadProcessMemory(hProcess, address, buffer))
+            {
+                return false;
+            }
+
+            var decoded = DecodePathCandidate(buffer, 0);
+            if (!LooksLikeMapPath(decoded))
+            {
+                return false;
+            }
+
+            mapPath = decoded;
+            return true;
+        }
+
+        private static bool TryGetCachedMapPathAddress(int processId, out long address)
+        {
+            lock (MapPathAddressLock)
+            {
+                return MapPathAddressByProcessId.TryGetValue(processId, out address);
+            }
+        }
+
+        private static void SaveCachedMapPathAddress(int processId, long address)
+        {
+            lock (MapPathAddressLock)
+            {
+                MapPathAddressByProcessId[processId] = address;
+                MapPathScanFailedProcessIds.Remove(processId);
+            }
+        }
+
+        private static bool HasScanFailed(int processId)
+        {
+            lock (MapPathAddressLock)
+            {
+                return MapPathScanFailedProcessIds.Contains(processId);
+            }
+        }
+
+        private static void MarkScanFailed(int processId)
+        {
+            lock (MapPathAddressLock)
+            {
+                MapPathScanFailedProcessIds.Add(processId);
+            }
+        }
+
+        private static string DecodePathCandidate(byte[] buffer, int startIndex)
+        {
+            var bytes = ReadNullTerminatedBytes(buffer, startIndex);
+            if (bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return NormalizePath(Encoding.Default.GetString(bytes));
+        }
+
+        private static bool LooksLikeMapPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            var normalized = NormalizePath(path);
+            return normalized.IndexOf(".dat", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   (normalized.IndexOf("\\", StringComparison.Ordinal) >= 0 ||
+                    normalized.IndexOf("/", StringComparison.Ordinal) >= 0 ||
+                    normalized.IndexOf(":", StringComparison.Ordinal) >= 0);
         }
 
         private static bool TryIsPathRooted(string path)
@@ -242,54 +353,6 @@ namespace CgStairFinder
             }
 
             return CgMapNameEncoding.GetString(bytes).Trim();
-        }
-
-        private static string DecodeMapPath(byte[] buffer)
-        {
-            if (buffer == null || buffer.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            // On some client builds, the 4 bytes at 0x18CCC8 are metadata and the path starts at +4.
-            var offsetCandidate = DecodePathCandidate(buffer, 4);
-            if (LooksLikeMapPath(offsetCandidate))
-            {
-                return offsetCandidate;
-            }
-
-            // Keep backward compatibility with the old layout.
-            var baseCandidate = DecodePathCandidate(buffer, 0);
-            if (LooksLikeMapPath(baseCandidate))
-            {
-                return baseCandidate;
-            }
-
-            return offsetCandidate.Length >= baseCandidate.Length ? offsetCandidate : baseCandidate;
-        }
-
-        private static string DecodePathCandidate(byte[] buffer, int startIndex)
-        {
-            var bytes = ReadNullTerminatedBytes(buffer, startIndex);
-            if (bytes.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            return NormalizePath(Encoding.Default.GetString(bytes));
-        }
-
-        private static bool LooksLikeMapPath(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
-
-            var normalized = NormalizePath(path);
-            return normalized.IndexOf(".dat", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                   (normalized.StartsWith("map\\", StringComparison.OrdinalIgnoreCase) ||
-                    normalized.Contains("\\"));
         }
 
         private static byte[] ReadNullTerminatedBytes(byte[] buffer)
