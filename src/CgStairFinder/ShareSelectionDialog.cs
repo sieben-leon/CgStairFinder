@@ -113,6 +113,33 @@ namespace CgStairFinder
                     inputKeyword.Items.Add(candidate);
                 }
 
+                var isApplyingKeywordCandidate = false;
+                Action<MapNameKeywordCandidate> applyKeywordCandidate = selectedCandidate =>
+                {
+                    if (isApplyingKeywordCandidate)
+                    {
+                        return;
+                    }
+
+                    if (selectedCandidate == null)
+                    {
+                        return;
+                    }
+
+                    isApplyingKeywordCandidate = true;
+                    try
+                    {
+                        inputKeyword.Text = selectedCandidate.SearchText;
+                        inputKeyword.SelectionStart = inputKeyword.Text.Length;
+                        inputKeyword.SelectionLength = 0;
+                        inputKeyword.SelectedIndex = -1;
+                    }
+                    finally
+                    {
+                        isApplyingKeywordCandidate = false;
+                    }
+                };
+
                 inputKeyword.SelectionChangeCommitted += (s, e) =>
                 {
                     var selectedCandidate = inputKeyword.SelectedItem as MapNameKeywordCandidate;
@@ -121,10 +148,8 @@ namespace CgStairFinder
                         return;
                     }
 
-                    inputKeyword.Text = selectedCandidate.SearchText;
-                    inputKeyword.SelectionStart = inputKeyword.Text.Length;
-                    inputKeyword.SelectionLength = 0;
-                    inputKeyword.SelectedIndex = -1;
+                    // ComboBox内部の選択反映後にキーワード文字列へ置き換える。
+                    form.BeginInvoke((Action)(() => applyKeywordCandidate(selectedCandidate)));
                 };
 
                 buttonSelectVisible.Text = "全選択";
@@ -218,17 +243,20 @@ namespace CgStairFinder
                     return true;
                 };
 
-                Action refreshVisibleItems = () =>
+                Action<bool> refreshVisibleItems = syncCheckedStateFromList =>
                 {
                     isRefreshing = true;
                     try
                     {
-                        for (var i = 0; i < checkedList.Items.Count; i++)
+                        if (syncCheckedStateFromList)
                         {
-                            var existing = checkedList.Items[i] as ShareLogItem;
-                            if (existing != null)
+                            for (var i = 0; i < checkedList.Items.Count; i++)
                             {
-                                checkedState[existing] = checkedList.GetItemChecked(i);
+                                var existing = checkedList.Items[i] as ShareLogItem;
+                                if (existing != null)
+                                {
+                                    checkedState[existing] = checkedList.GetItemChecked(i);
+                                }
                             }
                         }
 
@@ -279,11 +307,11 @@ namespace CgStairFinder
                     }
 
                     checkedState[item] = e.NewValue == CheckState.Checked;
-                    form.BeginInvoke((Action)refreshVisibleItems);
+                    form.BeginInvoke((Action)(() => refreshVisibleItems(false)));
                 };
 
-                inputRecentMinutes.ValueChanged += (s, e) => refreshVisibleItems();
-                inputKeyword.TextChanged += (s, e) => refreshVisibleItems();
+                inputRecentMinutes.ValueChanged += (s, e) => refreshVisibleItems(true);
+                inputKeyword.TextChanged += (s, e) => refreshVisibleItems(true);
 
                 buttonSelectVisible.Click += (s, e) =>
                 {
@@ -292,7 +320,7 @@ namespace CgStairFinder
                         checkedState[item] = true;
                     }
 
-                    refreshVisibleItems();
+                    refreshVisibleItems(false);
                 };
 
                 buttonUnselectVisible.Click += (s, e) =>
@@ -302,7 +330,7 @@ namespace CgStairFinder
                         checkedState[item] = false;
                     }
 
-                    refreshVisibleItems();
+                    refreshVisibleItems(false);
                 };
 
                 form.Controls.Add(checkedList);
@@ -314,7 +342,7 @@ namespace CgStairFinder
                 form.Controls.Add(label);
                 form.AcceptButton = buttonOk;
                 form.CancelButton = buttonCancel;
-                refreshVisibleItems();
+                refreshVisibleItems(false);
 
                 if (form.ShowDialog(owner) != DialogResult.OK)
                 {
@@ -354,7 +382,7 @@ namespace CgStairFinder
                 })
                 .Where(x => !string.IsNullOrWhiteSpace(x.Display) &&
                             !string.IsNullOrWhiteSpace(x.Search) &&
-                            x.Display.Contains('〇'))
+                            x.Display.IndexOf('\u3007') >= 0)
                 .GroupBy(x => x.Display, StringComparer.CurrentCultureIgnoreCase)
                 .Where(g => g.Count() >= 5)
                 .OrderByDescending(g => g.Count())
@@ -379,8 +407,26 @@ namespace CgStairFinder
                 return string.Empty;
             }
 
-            var chars = mapName.Select(ch => char.IsDigit(ch) ? '〇' : ch).ToArray();
-            return new string(chars).Trim();
+            var buffer = new List<char>(mapName.Length);
+            var previousIsDigit = false;
+            foreach (var ch in mapName)
+            {
+                if (char.IsDigit(ch))
+                {
+                    if (!previousIsDigit)
+                    {
+                        buffer.Add('\u3007');
+                    }
+
+                    previousIsDigit = true;
+                    continue;
+                }
+
+                previousIsDigit = false;
+                buffer.Add(ch);
+            }
+
+            return new string(buffer.ToArray()).Trim();
         }
 
         private static string ExtractPrefixBeforeFirstDigit(string mapName)
