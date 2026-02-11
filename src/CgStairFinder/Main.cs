@@ -2067,18 +2067,164 @@ namespace CgStairFinder
                 return;
             }
 
-            var deleted = sharedLogs.Keys
-                .Union(sharedPins.Keys, StringComparer.OrdinalIgnoreCase)
-                .Count();
-            sharedLogs.Clear();
-            sharedPins.Clear();
+            int deleteMinutes;
+            if (!TryAskSharedDeleteMinutes(out deleteMinutes))
+            {
+                return;
+            }
+
+            var deleteAll = deleteMinutes <= 0;
+            var threshold = DateTime.Now.AddMinutes(-deleteMinutes);
+
+            var logKeysToDelete = sharedLogs
+                .Where(x => x.Value != null && (deleteAll || x.Value.DetectTime <= threshold))
+                .Select(x => x.Key)
+                .ToList();
+
+            var latestSharedLogByMapCode = sharedLogs.Values
+                .Where(x => x != null && !string.IsNullOrWhiteSpace(x.MapCode))
+                .GroupBy(x => x.MapCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(x => x.DetectTime).First().DetectTime,
+                    StringComparer.OrdinalIgnoreCase);
+
+            var pinKeysToDelete = sharedPins.Keys
+                .Where(mapCode =>
+                {
+                    if (deleteAll)
+                    {
+                        return true;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(mapCode))
+                    {
+                        return false;
+                    }
+
+                    DateTime latest;
+                    if (!latestSharedLogByMapCode.TryGetValue(mapCode, out latest))
+                    {
+                        return false;
+                    }
+
+                    return latest <= threshold;
+                })
+                .ToList();
+
+            foreach (var key in logKeysToDelete)
+            {
+                sharedLogs.Remove(key);
+            }
+
+            foreach (var key in pinKeysToDelete)
+            {
+                sharedPins.Remove(key);
+            }
+
             RefreshStairListFromLatest();
+
+            if (!logKeysToDelete.Any() && !pinKeysToDelete.Any())
+            {
+                MessageBox.Show(
+                    this,
+                    "削除対象の共有データはありませんでした。",
+                    "メッセージ",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
             MessageBox.Show(
                 this,
-                string.Format("\u5171\u6709\u30C7\u30FC\u30BF\u3092\u524A\u9664\u3057\u307E\u3057\u305F\u3002\n\n{0} \u30DE\u30C3\u30D7", deleted),
+                string.Format(
+                    "共有データを削除しました。\n\n共有ログ: {0} 件\n共有ピン: {1} マップ",
+                    logKeysToDelete.Count,
+                    pinKeysToDelete.Count),
                 "\u30E1\u30C3\u30BB\u30FC\u30B8",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+
+        private bool TryAskSharedDeleteMinutes(out int deleteMinutes)
+        {
+            deleteMinutes = 0;
+
+            using (var dialog = new Form())
+            using (var label = new Label())
+            using (var inputMinutes = new NumericUpDown())
+            using (var labelSuffix = new Label())
+            using (var panel = new FlowLayoutPanel())
+            using (var buttonOk = new Button())
+            using (var buttonCancel = new Button())
+            using (var buttonPanel = new FlowLayoutPanel())
+            {
+                dialog.Text = "共有削除";
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.ClientSize = new Size(360, 140);
+                dialog.Font = Font;
+
+                label.AutoSize = false;
+                label.Dock = DockStyle.Top;
+                label.Height = 38;
+                label.Padding = new Padding(10, 10, 10, 0);
+                label.TextAlign = ContentAlignment.MiddleLeft;
+                label.Text = "何分以上経過した共有データを削除しますか？";
+
+                panel.AutoSize = false;
+                panel.Dock = DockStyle.Top;
+                panel.Height = 40;
+                panel.Padding = new Padding(10, 0, 10, 0);
+                panel.FlowDirection = FlowDirection.LeftToRight;
+                panel.WrapContents = false;
+
+                inputMinutes.Minimum = 0;
+                inputMinutes.Maximum = 525600;
+                inputMinutes.Value = 60;
+                inputMinutes.Width = 90;
+                inputMinutes.Margin = new Padding(0, 6, 6, 0);
+
+                labelSuffix.AutoSize = true;
+                labelSuffix.Margin = new Padding(0, 10, 0, 0);
+                labelSuffix.Text = "分以上（0 = 全削除）";
+
+                panel.Controls.Add(inputMinutes);
+                panel.Controls.Add(labelSuffix);
+
+                buttonPanel.Dock = DockStyle.Bottom;
+                buttonPanel.Height = 42;
+                buttonPanel.FlowDirection = FlowDirection.RightToLeft;
+                buttonPanel.Padding = new Padding(8, 6, 8, 6);
+
+                buttonOk.Text = "削除";
+                buttonOk.Width = 88;
+                buttonOk.DialogResult = DialogResult.OK;
+
+                buttonCancel.Text = "キャンセル";
+                buttonCancel.Width = 88;
+                buttonCancel.DialogResult = DialogResult.Cancel;
+
+                buttonPanel.Controls.Add(buttonOk);
+                buttonPanel.Controls.Add(buttonCancel);
+
+                dialog.Controls.Add(buttonPanel);
+                dialog.Controls.Add(panel);
+                dialog.Controls.Add(label);
+                dialog.AcceptButton = buttonOk;
+                dialog.CancelButton = buttonCancel;
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return false;
+                }
+
+                deleteMinutes = (int)inputMinutes.Value;
+                return true;
+            }
         }
 
         private void CheckBoxShowTerrain_CheckedChanged(object sender, EventArgs e)

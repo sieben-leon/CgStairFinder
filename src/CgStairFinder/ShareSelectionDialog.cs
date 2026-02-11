@@ -132,7 +132,7 @@ namespace CgStairFinder
                         inputKeyword.Text = selectedCandidate.SearchText;
                         inputKeyword.SelectionStart = inputKeyword.Text.Length;
                         inputKeyword.SelectionLength = 0;
-                        inputKeyword.SelectedIndex = -1;
+                        inputKeyword.DroppedDown = false;
                     }
                     finally
                     {
