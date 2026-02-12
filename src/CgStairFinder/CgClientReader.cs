@@ -256,8 +256,12 @@ namespace CgStairFinder
                     return result;
                 }
 
-                SaveCachedMapPathAddress(process.Id, bestCandidate.Address);
-                SavePersistedMapPathOffset((int)(bestCandidate.Address - AddressMapPath));
+                // Persist only when the resolved map path actually exists under cgDir\map.
+                if (bestCandidate.ResolvedExists)
+                {
+                    SaveCachedMapPathAddress(process.Id, bestCandidate.Address);
+                    SavePersistedMapPathOffset((int)(bestCandidate.Address - AddressMapPath));
+                }
                 result.Success = true;
                 result.FoundAddress = bestCandidate.Address;
                 result.OffsetFromDefault = (int)(bestCandidate.Address - AddressMapPath);
@@ -501,22 +505,8 @@ namespace CgStairFinder
 
         private static string ResolveProbePath(string rawPath, string cgDir)
         {
-            if (string.IsNullOrWhiteSpace(rawPath))
-            {
-                return string.Empty;
-            }
-
-            if (TryIsPathRooted(rawPath))
-            {
-                return rawPath;
-            }
-
-            if (string.IsNullOrWhiteSpace(cgDir))
-            {
-                return string.Empty;
-            }
-
-            return TryCombine(cgDir, rawPath.TrimStart('\\')) ?? string.Empty;
+            string resolvedPath;
+            return TryResolveMapDatPath(rawPath, cgDir, out resolvedPath) ? resolvedPath : string.Empty;
         }
 
         private static bool IsDotDat(byte[] buffer, int index)
@@ -608,7 +598,7 @@ namespace CgStairFinder
 
             string rawPath;
             long resolvedAddress;
-            if (!TryReadMapPath(hProcess, processId, out rawPath, out resolvedAddress))
+            if (!TryReadMapPath(hProcess, processId, cgDir, out rawPath, out resolvedAddress))
             {
                 usedLatestMapFallback = true;
                 return GetLatestMapFile(cgDir);
@@ -616,24 +606,7 @@ namespace CgStairFinder
 
             mapPathOffset = (int)(resolvedAddress - AddressMapPath);
 
-            var normalizedPath = NormalizePath(rawPath);
-            if (string.IsNullOrWhiteSpace(normalizedPath))
-            {
-                usedLatestMapFallback = true;
-                return GetLatestMapFile(cgDir);
-            }
-
-            string candidate = null;
-            if (TryIsPathRooted(normalizedPath))
-            {
-                candidate = normalizedPath;
-            }
-            else if (!string.IsNullOrWhiteSpace(cgDir))
-            {
-                candidate = TryCombine(cgDir, normalizedPath.TrimStart('\\'));
-            }
-
-            var fileInfo = TryCreateFileInfo(candidate);
+            var fileInfo = TryCreateFileInfo(rawPath);
             if (fileInfo != null && fileInfo.Exists)
             {
                 return fileInfo;
@@ -643,7 +616,7 @@ namespace CgStairFinder
             return GetLatestMapFile(cgDir);
         }
 
-        private static bool TryReadMapPath(IntPtr hProcess, int processId, out string mapPath, out long resolvedAddress)
+        private static bool TryReadMapPath(IntPtr hProcess, int processId, string cgDir, out string mapPath, out long resolvedAddress)
         {
             mapPath = string.Empty;
             resolvedAddress = 0;
@@ -670,11 +643,26 @@ namespace CgStairFinder
                     continue;
                 }
 
+                string resolvedMapPath;
+                if (!TryResolveMapDatPath(mapPath, cgDir, out resolvedMapPath))
+                {
+                    continue;
+                }
+
+                var fileInfo = TryCreateFileInfo(resolvedMapPath);
+                if (fileInfo == null || !fileInfo.Exists)
+                {
+                    continue;
+                }
+
                 SaveCachedMapPathAddress(processId, address);
                 SavePersistedMapPathOffset((int)(address - AddressMapPath));
+                mapPath = resolvedMapPath;
                 resolvedAddress = address;
                 return true;
             }
+
+            mapPath = string.Empty;
             return false;
         }
 
@@ -767,10 +755,91 @@ namespace CgStairFinder
             }
 
             var normalized = NormalizePath(path);
-            return normalized.IndexOf(".dat", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                   (normalized.IndexOf("\\", StringComparison.Ordinal) >= 0 ||
-                    normalized.IndexOf("/", StringComparison.Ordinal) >= 0 ||
-                    normalized.IndexOf(":", StringComparison.Ordinal) >= 0);
+            if (!normalized.EndsWith(".dat", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return normalized.IndexOf("map\\", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool TryResolveMapDatPath(string rawPath, string cgDir, out string resolvedPath)
+        {
+            resolvedPath = string.Empty;
+            if (!LooksLikeMapPath(rawPath))
+            {
+                return false;
+            }
+
+            var normalizedPath = NormalizePath(rawPath).Trim('"');
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                return false;
+            }
+
+            string candidatePath;
+            if (TryIsPathRooted(normalizedPath))
+            {
+                candidatePath = normalizedPath;
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(cgDir))
+                {
+                    return false;
+                }
+
+                candidatePath = TryCombine(cgDir, normalizedPath.TrimStart('\\'));
+            }
+
+            var normalizedFullPath = TryGetFullPathNormalized(candidatePath);
+            if (string.IsNullOrWhiteSpace(normalizedFullPath))
+            {
+                return false;
+            }
+
+            if (!IsUnderMapDirectory(normalizedFullPath, cgDir))
+            {
+                return false;
+            }
+
+            resolvedPath = normalizedFullPath;
+            return true;
+        }
+
+        private static bool IsUnderMapDirectory(string fullPath, string cgDir)
+        {
+            var mapDir = TryCombine(cgDir ?? string.Empty, "map");
+            var normalizedMapDir = TryGetFullPathNormalized(mapDir);
+            if (string.IsNullOrWhiteSpace(normalizedMapDir))
+            {
+                return false;
+            }
+
+            var normalizedFullPath = TryGetFullPathNormalized(fullPath);
+            if (string.IsNullOrWhiteSpace(normalizedFullPath))
+            {
+                return false;
+            }
+
+            return normalizedFullPath.StartsWith(normalizedMapDir + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string TryGetFullPathNormalized(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return NormalizePath(Path.GetFullPath(path)).TrimEnd('\\');
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return string.Empty;
+            }
         }
 
         private static bool TryIsPathRooted(string path)
