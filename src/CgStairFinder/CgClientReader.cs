@@ -235,7 +235,7 @@ namespace CgStairFinder
                         ref scannedBytes,
                         ref bestCandidate);
 
-                    if (bestCandidate != null || scannedBytes >= ProbeMaxBytes)
+                    if ((bestCandidate != null && bestCandidate.ResolvedExists) || scannedBytes >= ProbeMaxBytes)
                     {
                         break;
                     }
@@ -250,7 +250,7 @@ namespace CgStairFinder
 
                 result.StoppedByByteLimit = scannedBytes >= ProbeMaxBytes;
                 result.BytesScanned = scannedBytes;
-                if (bestCandidate == null)
+                if (bestCandidate == null || !bestCandidate.ResolvedExists)
                 {
                     result.ErrorMessage = "有効な .dat パス候補を見つけられませんでした。";
                     return result;
