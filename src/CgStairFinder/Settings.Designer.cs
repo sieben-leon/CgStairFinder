@@ -34,5 +34,29 @@ namespace CgStairFinder {
                 this["cgDir"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int mapPathOffset {
+            get {
+                return ((int)(this["mapPathOffset"]));
+            }
+            set {
+                this["mapPathOffset"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool mapPathOffsetSaved {
+            get {
+                return ((bool)(this["mapPathOffsetSaved"]));
+            }
+            set {
+                this["mapPathOffsetSaved"] = value;
+            }
+        }
     }
 }

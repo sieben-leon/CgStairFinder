@@ -210,7 +210,7 @@ namespace CgStairFinder
                 buttonPanel.Controls.Add(buttonOk);
                 buttonPanel.Controls.Add(buttonCancel);
 
-                var checkedState = candidates.ToDictionary(x => x, x => true);
+                var checkedState = candidates.ToDictionary(x => x, x => false);
                 var isRefreshing = false;
 
                 Func<ShareLogItem, bool> matchFilter = item =>
@@ -273,8 +273,8 @@ namespace CgStairFinder
                             bool isChecked;
                             if (!checkedState.TryGetValue(candidate, out isChecked))
                             {
-                                isChecked = true;
-                                checkedState[candidate] = true;
+                                isChecked = false;
+                                checkedState[candidate] = false;
                             }
 
                             checkedList.Items.Add(candidate, isChecked);

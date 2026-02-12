@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using CgStairFinder.Properties;
 
 namespace CgStairFinder
 {
@@ -23,19 +25,42 @@ namespace CgStairFinder
         public int South { get; set; }
     }
 
+    internal sealed class MapPathProbeResult
+    {
+        public bool Success { get; set; }
+        public int ProcessId { get; set; }
+        public string ProcessName { get; set; }
+        public long? FoundAddress { get; set; }
+        public int? OffsetFromDefault { get; set; }
+        public string RawPath { get; set; }
+        public string ResolvedPath { get; set; }
+        public bool ResolvedPathExists { get; set; }
+        public int RegionsScanned { get; set; }
+        public long BytesScanned { get; set; }
+        public int CandidateCount { get; set; }
+        public bool StoppedByByteLimit { get; set; }
+        public string ErrorMessage { get; set; }
+    }
+
     internal static class CgClientReader
     {
         private const int ProcessAccessAll = 0x1F0FFF;
+        private const int ProcessAccessQueryAndRead = 0x0410;
         private const long AddressMapName = 0x95C870;
-        private const long AddressMapPath = 0x18CCC8;
+        private const long AddressMapPath = 0x18CCCC;
         private const int MapPathBufferSize = 128;
-        private const int MapPathScanRangeBytes = 128;
+        private const int ProbeChunkSize = 64 * 1024;
+        private const long ProbeMaxBytes = 64L * 1024L * 1024L;
+        private const long ProbeInitialRangeBytes = 0x10000; // 64KB
+        private const long ProbeMaxRangeBytes = 0x200000; // 2MB
         private const long AddressEast = 0x95C88C;
         private const long AddressSouth = 0x95C890;
+        private const uint MemCommit = 0x1000;
+        private const uint PageGuard = 0x100;
+        private const uint PageNoAccess = 0x01;
 
         private static readonly Encoding CgMapNameEncoding = Encoding.GetEncoding(950);
         private static readonly Dictionary<int, long> MapPathAddressByProcessId = new Dictionary<int, long>();
-        private static readonly HashSet<int> MapPathScanFailedProcessIds = new HashSet<int>();
         private static readonly object MapPathAddressLock = new object();
 
         [DllImport("kernel32.dll")]
@@ -46,6 +71,53 @@ namespace CgStairFinder
 
         [DllImport("kernel32.dll")]
         private static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr VirtualQueryEx(
+            IntPtr hProcess,
+            IntPtr lpAddress,
+            out MEMORY_BASIC_INFORMATION lpBuffer,
+            IntPtr dwLength);
+
+        [DllImport("kernel32.dll")]
+        private static extern void GetNativeSystemInfo(out SYSTEM_INFO lpSystemInfo);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MEMORY_BASIC_INFORMATION
+        {
+            public IntPtr BaseAddress;
+            public IntPtr AllocationBase;
+            public uint AllocationProtect;
+            public UIntPtr RegionSize;
+            public uint State;
+            public uint Protect;
+            public uint Type;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SYSTEM_INFO
+        {
+            public ushort ProcessorArchitecture;
+            public ushort Reserved;
+            public uint PageSize;
+            public IntPtr MinimumApplicationAddress;
+            public IntPtr MaximumApplicationAddress;
+            public IntPtr ActiveProcessorMask;
+            public uint NumberOfProcessors;
+            public uint ProcessorType;
+            public uint AllocationGranularity;
+            public ushort ProcessorLevel;
+            public ushort ProcessorRevision;
+        }
+
+        private sealed class MapPathCandidate
+        {
+            public long Address { get; set; }
+            public string RawPath { get; set; }
+            public string ResolvedPath { get; set; }
+            public bool ResolvedExists { get; set; }
+            public int Score { get; set; }
+        }
 
         public static FileInfo GetLatestMapFile(string cgDir)
         {
@@ -125,6 +197,91 @@ namespace CgStairFinder
             }
         }
 
+        public static MapPathProbeResult ProbeMapPathAddress(Process process, string cgDir)
+        {
+            var result = new MapPathProbeResult
+            {
+                ProcessId = process?.Id ?? 0,
+                ProcessName = process?.ProcessName ?? string.Empty
+            };
+
+            if (process == null || process.HasExited)
+            {
+                result.ErrorMessage = "プロセスが見つからないか、既に終了しています。";
+                return result;
+            }
+
+            var hProcess = OpenProcess(ProcessAccessQueryAndRead, false, process.Id);
+            if (hProcess == IntPtr.Zero)
+            {
+                result.ErrorMessage = "プロセスのメモリーを開けませんでした。管理者権限を確認してください。";
+                return result;
+            }
+
+            try
+            {
+                var scannedBytes = 0L;
+                MapPathCandidate bestCandidate = null;
+                var range = ProbeInitialRangeBytes;
+
+                while (range <= ProbeMaxRangeBytes)
+                {
+                    ScanAddressRangeForMapPathCandidate(
+                        hProcess,
+                        AddressMapPath - range,
+                        AddressMapPath + range,
+                        cgDir,
+                        result,
+                        ref scannedBytes,
+                        ref bestCandidate);
+
+                    if (bestCandidate != null || scannedBytes >= ProbeMaxBytes)
+                    {
+                        break;
+                    }
+
+                    if (range == ProbeMaxRangeBytes)
+                    {
+                        break;
+                    }
+
+                    range = Math.Min(ProbeMaxRangeBytes, range * 2);
+                }
+
+                result.StoppedByByteLimit = scannedBytes >= ProbeMaxBytes;
+                result.BytesScanned = scannedBytes;
+                if (bestCandidate == null)
+                {
+                    result.ErrorMessage = "有効な .dat パス候補を見つけられませんでした。";
+                    return result;
+                }
+
+                SaveCachedMapPathAddress(process.Id, bestCandidate.Address);
+                SavePersistedMapPathOffset((int)(bestCandidate.Address - AddressMapPath));
+                result.Success = true;
+                result.FoundAddress = bestCandidate.Address;
+                result.OffsetFromDefault = (int)(bestCandidate.Address - AddressMapPath);
+                result.RawPath = bestCandidate.RawPath ?? string.Empty;
+                result.ResolvedPath = bestCandidate.ResolvedPath ?? string.Empty;
+                result.ResolvedPathExists = bestCandidate.ResolvedExists;
+                return result;
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException ||
+                ex is IOException ||
+                ex is UnauthorizedAccessException ||
+                ex is Win32Exception ||
+                ex is NotSupportedException)
+            {
+                result.ErrorMessage = ex.Message;
+                return result;
+            }
+            finally
+            {
+                CloseHandle(hProcess);
+            }
+        }
+
         private static bool TryReadProcessMemory(IntPtr hProcess, long address, byte[] buffer)
         {
             if (hProcess == IntPtr.Zero || buffer == null || buffer.Length == 0)
@@ -134,6 +291,314 @@ namespace CgStairFinder
 
             IntPtr bytesRead;
             return ReadProcessMemory(hProcess, new IntPtr(address), buffer, buffer.Length, out bytesRead);
+        }
+
+        private static void ScanAddressRangeForMapPathCandidate(
+            IntPtr hProcess,
+            long scanStart,
+            long scanEnd,
+            string cgDir,
+            MapPathProbeResult result,
+            ref long scannedBytes,
+            ref MapPathCandidate bestCandidate)
+        {
+            if (scanStart > scanEnd)
+            {
+                return;
+            }
+
+            SYSTEM_INFO info;
+            GetNativeSystemInfo(out info);
+            var minimum = info.MinimumApplicationAddress.ToInt64();
+            var maximum = info.MaximumApplicationAddress.ToInt64();
+            var effectiveStart = Math.Max(scanStart, minimum);
+            var effectiveEnd = Math.Min(scanEnd, maximum);
+            if (effectiveStart > effectiveEnd)
+            {
+                return;
+            }
+
+            var mbiSize = Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION));
+            var current = effectiveStart;
+            while (current <= effectiveEnd && scannedBytes < ProbeMaxBytes)
+            {
+                MEMORY_BASIC_INFORMATION mbi;
+                var queried = VirtualQueryEx(hProcess, new IntPtr(current), out mbi, new IntPtr(mbiSize));
+                if (queried == IntPtr.Zero)
+                {
+                    current += 0x1000;
+                    continue;
+                }
+
+                var baseAddress = mbi.BaseAddress.ToInt64();
+                var regionSize = SafeToInt64(mbi.RegionSize);
+                if (regionSize <= 0)
+                {
+                    current += 0x1000;
+                    continue;
+                }
+
+                var nextAddress = SafeAddressAdd(baseAddress, regionSize, current);
+                if (IsReadableCommittedRegion(mbi))
+                {
+                    var regionStart = Math.Max(baseAddress, effectiveStart);
+                    var regionEnd = Math.Min(baseAddress + regionSize - 1, effectiveEnd);
+                    if (regionEnd >= regionStart)
+                    {
+                        result.RegionsScanned++;
+                        ScanRegionForMapPathCandidate(
+                            hProcess,
+                            regionStart,
+                            regionEnd - regionStart + 1,
+                            cgDir,
+                            result,
+                            ref scannedBytes,
+                            ref bestCandidate);
+                    }
+                }
+
+                current = nextAddress;
+            }
+        }
+
+        private static void ScanRegionForMapPathCandidate(
+            IntPtr hProcess,
+            long readStartAddress,
+            long readLengthTotal,
+            string cgDir,
+            MapPathProbeResult result,
+            ref long scannedBytes,
+            ref MapPathCandidate bestCandidate)
+        {
+            var offset = 0L;
+            while (offset < readLengthTotal && scannedBytes < ProbeMaxBytes)
+            {
+                var remainingInRegion = readLengthTotal - offset;
+                if (remainingInRegion <= 0)
+                {
+                    break;
+                }
+
+                var remainingBudget = ProbeMaxBytes - scannedBytes;
+                if (remainingBudget <= 0)
+                {
+                    break;
+                }
+
+                var readLength = (int)Math.Min(ProbeChunkSize, Math.Min(remainingInRegion, remainingBudget));
+                var buffer = new byte[readLength];
+                IntPtr bytesRead;
+                var success = ReadProcessMemory(hProcess, new IntPtr(readStartAddress + offset), buffer, readLength, out bytesRead);
+                if (!success)
+                {
+                    offset += readLength;
+                    continue;
+                }
+
+                var actualRead = (int)Math.Max(0, Math.Min((long)readLength, bytesRead.ToInt64()));
+                if (actualRead <= 0)
+                {
+                    offset += readLength;
+                    continue;
+                }
+
+                scannedBytes += actualRead;
+                FindBestMapPathCandidateInBuffer(
+                    buffer,
+                    actualRead,
+                    readStartAddress + offset,
+                    cgDir,
+                    result,
+                    ref bestCandidate);
+                offset += actualRead;
+            }
+        }
+
+        private static void FindBestMapPathCandidateInBuffer(
+            byte[] buffer,
+            int length,
+            long bufferAddress,
+            string cgDir,
+            MapPathProbeResult result,
+            ref MapPathCandidate bestCandidate)
+        {
+            for (var i = 0; i <= length - 4; i++)
+            {
+                if (!IsDotDat(buffer, i))
+                {
+                    continue;
+                }
+
+                var start = i;
+                while (start > 0 && IsPathChar(buffer[start - 1]))
+                {
+                    start--;
+                }
+
+                var end = i + 4;
+                while (end < length && IsPathChar(buffer[end]))
+                {
+                    end++;
+                }
+
+                var candidateLen = end - start;
+                if (candidateLen < 8 || candidateLen > 320)
+                {
+                    continue;
+                }
+
+                var bytes = new byte[candidateLen];
+                Buffer.BlockCopy(buffer, start, bytes, 0, candidateLen);
+                var rawCandidate = NormalizePath(Encoding.Default.GetString(bytes)).Trim('"');
+                if (!LooksLikeMapPath(rawCandidate))
+                {
+                    continue;
+                }
+
+                var resolved = ResolveProbePath(rawCandidate, cgDir);
+                var resolvedExists = !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved);
+                result.CandidateCount++;
+
+                var score = ScorePathCandidate(rawCandidate, resolvedExists);
+                if (bestCandidate != null && score <= bestCandidate.Score)
+                {
+                    continue;
+                }
+
+                bestCandidate = new MapPathCandidate
+                {
+                    Address = bufferAddress + start,
+                    RawPath = rawCandidate,
+                    ResolvedPath = resolved ?? string.Empty,
+                    ResolvedExists = resolvedExists,
+                    Score = score
+                };
+            }
+        }
+
+        private static int ScorePathCandidate(string rawPath, bool resolvedExists)
+        {
+            var score = 0;
+            if (resolvedExists)
+            {
+                score += 100;
+            }
+
+            if (!string.IsNullOrWhiteSpace(rawPath) &&
+                rawPath.IndexOf("map\\", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                score += 20;
+            }
+
+            if (!string.IsNullOrWhiteSpace(rawPath) &&
+                rawPath.EndsWith(".dat", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 10;
+            }
+
+            return score;
+        }
+
+        private static string ResolveProbePath(string rawPath, string cgDir)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                return string.Empty;
+            }
+
+            if (TryIsPathRooted(rawPath))
+            {
+                return rawPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(cgDir))
+            {
+                return string.Empty;
+            }
+
+            return TryCombine(cgDir, rawPath.TrimStart('\\')) ?? string.Empty;
+        }
+
+        private static bool IsDotDat(byte[] buffer, int index)
+        {
+            if (buffer == null || index < 0 || index + 3 >= buffer.Length)
+            {
+                return false;
+            }
+
+            return buffer[index] == (byte)'.' &&
+                   ToLowerAscii(buffer[index + 1]) == (byte)'d' &&
+                   ToLowerAscii(buffer[index + 2]) == (byte)'a' &&
+                   ToLowerAscii(buffer[index + 3]) == (byte)'t';
+        }
+
+        private static byte ToLowerAscii(byte value)
+        {
+            return value >= (byte)'A' && value <= (byte)'Z'
+                ? (byte)(value + 32)
+                : value;
+        }
+
+        private static bool IsPathChar(byte b)
+        {
+            if (b == 0)
+            {
+                return false;
+            }
+
+            if (b < 32 || b > 126)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsReadableCommittedRegion(MEMORY_BASIC_INFORMATION mbi)
+        {
+            if (mbi.State != MemCommit)
+            {
+                return false;
+            }
+
+            if ((mbi.Protect & PageGuard) != 0 || (mbi.Protect & PageNoAccess) != 0)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static long SafeToInt64(UIntPtr value)
+        {
+            try
+            {
+                return (long)value.ToUInt64();
+            }
+            catch (OverflowException)
+            {
+                return long.MaxValue;
+            }
+        }
+
+        private static long SafeAddressAdd(long baseAddress, long size, long fallbackCurrent)
+        {
+            try
+            {
+                checked
+                {
+                    var next = baseAddress + size;
+                    if (next > fallbackCurrent)
+                    {
+                        return next;
+                    }
+                }
+            }
+            catch (OverflowException)
+            {
+            }
+
+            return fallbackCurrent + 0x1000;
         }
 
         private static FileInfo ResolveMapFile(IntPtr hProcess, int processId, string cgDir, out int? mapPathOffset, out bool usedLatestMapFallback)
@@ -190,7 +655,12 @@ namespace CgStairFinder
                 candidateAddresses.Add(cachedAddress);
             }
 
-            candidateAddresses.Add(AddressMapPath + 4);
+            var persistedOffset = TryLoadPersistedMapPathOffset();
+            if (persistedOffset.HasValue)
+            {
+                candidateAddresses.Add(AddressMapPath + persistedOffset.Value);
+            }
+
             candidateAddresses.Add(AddressMapPath);
 
             foreach (var address in candidateAddresses.Distinct())
@@ -201,28 +671,10 @@ namespace CgStairFinder
                 }
 
                 SaveCachedMapPathAddress(processId, address);
+                SavePersistedMapPathOffset((int)(address - AddressMapPath));
                 resolvedAddress = address;
                 return true;
             }
-
-            if (HasScanFailed(processId))
-            {
-                return false;
-            }
-
-            for (var address = AddressMapPath - MapPathScanRangeBytes; address <= AddressMapPath + MapPathScanRangeBytes; address++)
-            {
-                if (!TryReadMapPathAtAddress(hProcess, address, out mapPath))
-                {
-                    continue;
-                }
-
-                SaveCachedMapPathAddress(processId, address);
-                resolvedAddress = address;
-                return true;
-            }
-
-            MarkScanFailed(processId);
             return false;
         }
 
@@ -258,23 +710,41 @@ namespace CgStairFinder
             lock (MapPathAddressLock)
             {
                 MapPathAddressByProcessId[processId] = address;
-                MapPathScanFailedProcessIds.Remove(processId);
             }
         }
 
-        private static bool HasScanFailed(int processId)
+        private static int? TryLoadPersistedMapPathOffset()
         {
-            lock (MapPathAddressLock)
+            try
             {
-                return MapPathScanFailedProcessIds.Contains(processId);
+                if (!Settings.Default.mapPathOffsetSaved)
+                {
+                    return null;
+                }
+
+                return Settings.Default.mapPathOffset;
+            }
+            catch
+            {
+                return null;
             }
         }
 
-        private static void MarkScanFailed(int processId)
+        private static void SavePersistedMapPathOffset(int offset)
         {
-            lock (MapPathAddressLock)
+            try
             {
-                MapPathScanFailedProcessIds.Add(processId);
+                if (Settings.Default.mapPathOffsetSaved && Settings.Default.mapPathOffset == offset)
+                {
+                    return;
+                }
+
+                Settings.Default.mapPathOffset = offset;
+                Settings.Default.mapPathOffsetSaved = true;
+                Settings.Default.Save();
+            }
+            catch
+            {
             }
         }
 

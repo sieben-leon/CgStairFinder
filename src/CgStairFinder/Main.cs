@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace CgStairFinder
@@ -45,6 +46,8 @@ namespace CgStairFinder
         private Button buttonRecenterMap;
         private Button buttonManagePins;
         private Button buttonMiniMapOnly;
+        private Button buttonLocateMapPath;
+        private FlowLayoutPanel flowLayoutPanelMiniMapOnly;
         private TableLayoutPanel mapOptionPanel;
         private CheckBox checkBoxGameOrientation;
         private Label labelMiniMapHint;
@@ -80,6 +83,7 @@ namespace CgStairFinder
         private void Main_Load(object sender, EventArgs e)
         {
             LoadLocalPins();
+            tableLayoutPanel2.Resize += TableLayoutPanel2_Resize;
             InitializeMiniMapInteractions();
             InitializeMiniMapOverlayController();
             EnsurePinManageButton();
@@ -87,8 +91,53 @@ namespace CgStairFinder
             EnsureMapOptionPanel();
             UpdateGameOrientationAvailability();
             EnsureMiniMapHintLabel();
+            EnsureMapPathProbeButton();
+            UpdateMainMiniMapFrameSize();
             SetCgDirDisplayText();
             CgListReload(true);
+        }
+
+        private void EnsureMapPathProbeButton()
+        {
+            if (buttonLocateMapPath != null || tableLayoutPanel2 == null)
+            {
+                return;
+            }
+
+            buttonLocateMapPath = new Button
+            {
+                Text = "メモリー特定",
+                AutoSize = false,
+                Size = new Size(108, 26),
+                Margin = new Padding(3, 0, 0, 0),
+                Anchor = AnchorStyles.Right | AnchorStyles.Top,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(241, 245, 249),
+                Visible = false
+            };
+            buttonLocateMapPath.Font = new Font(Font.FontFamily, 8.75f, FontStyle.Regular);
+            buttonLocateMapPath.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            buttonLocateMapPath.Click += ButtonLocateMapPath_Click;
+
+            tableLayoutPanel2.RowStyles[7].Height = 30F;
+            tableLayoutPanel2.SetColumnSpan(label2, 1);
+            label2.AutoEllipsis = true;
+            label2.Margin = new Padding(3, 0, 3, 0);
+            tableLayoutPanel2.Controls.Add(buttonLocateMapPath, 1, 7);
+        }
+
+        private void UpdateMapPathProbeButtonVisibility(bool visible)
+        {
+            if (buttonLocateMapPath == null)
+            {
+                return;
+            }
+
+            buttonLocateMapPath.Visible = visible;
+            if (tableLayoutPanel2 != null && label2 != null)
+            {
+                tableLayoutPanel2.SetColumnSpan(label2, visible ? 1 : 2);
+            }
         }
 
         private void InitializeMiniMapOverlayController()
@@ -191,21 +240,74 @@ namespace CgStairFinder
                     Size = new Size(118, 32),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.FromArgb(241, 245, 249),
-                    Margin = new Padding(3, 3, 0, 0)
+                    Margin = new Padding(0, 0, 0, 0)
                 };
                 buttonMiniMapOnly.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
                 buttonMiniMapOnly.Click += ButtonMiniMapOnly_Click;
             }
 
+            if (flowLayoutPanelMiniMapOnly == null)
+            {
+                flowLayoutPanelMiniMapOnly = new FlowLayoutPanel
+                {
+                    AutoSize = true,
+                    Dock = DockStyle.Fill,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Margin = new Padding(3, 3, 3, 0),
+                    WrapContents = false
+                };
+                tableLayoutPanel2.Controls.Add(flowLayoutPanelMiniMapOnly, 1, 4);
+            }
+
             button1.Margin = new Padding(3, 3, 0, 3);
+            flowLayoutPanelMiniMapOnly.SuspendLayout();
+            flowLayoutPanelMiniMapOnly.Controls.Clear();
+            flowLayoutPanelMiniMapOnly.Controls.Add(buttonMiniMapOnly);
+            flowLayoutPanelMiniMapOnly.ResumeLayout();
+
             flowLayoutPanel2.SuspendLayout();
             flowLayoutPanel2.Controls.Clear();
             flowLayoutPanel2.FlowDirection = FlowDirection.RightToLeft;
-            flowLayoutPanel2.WrapContents = true;
-            flowLayoutPanel2.Controls.Add(buttonMiniMapOnly);
+            flowLayoutPanel2.WrapContents = false;
+            flowLayoutPanel2.Margin = new Padding(3, 3, 3, 3);
             flowLayoutPanel2.Controls.Add(button1);
-            flowLayoutPanel2.SetFlowBreak(buttonMiniMapOnly, true);
             flowLayoutPanel2.ResumeLayout();
+        }
+
+        private void TableLayoutPanel2_Resize(object sender, EventArgs e)
+        {
+            UpdateMainMiniMapFrameSize();
+        }
+
+        private void UpdateMainMiniMapFrameSize()
+        {
+            if (tableLayoutPanel2 == null || pictureBoxMap == null)
+            {
+                return;
+            }
+
+            var rowHeights = tableLayoutPanel2.GetRowHeights();
+            var columnWidths = tableLayoutPanel2.GetColumnWidths();
+            if (rowHeights == null || rowHeights.Length <= 3 || columnWidths == null || columnWidths.Length <= 1)
+            {
+                return;
+            }
+
+            var availableHeight = rowHeights[3] - pictureBoxMap.Margin.Vertical;
+            var availableWidth = columnWidths[1] - pictureBoxMap.Margin.Horizontal;
+            var side = Math.Min(availableWidth, availableHeight);
+            if (side <= 0)
+            {
+                return;
+            }
+
+            var newSize = new Size(side, side);
+            if (pictureBoxMap.Size == newSize)
+            {
+                return;
+            }
+
+            pictureBoxMap.Size = newSize;
         }
 
         private void ButtonMiniMapOnly_Click(object sender, EventArgs e)
@@ -579,6 +681,7 @@ namespace CgStairFinder
         {
             timer1.Stop();
             label2.ResetText();
+            UpdateMapPathProbeButtonVisibility(false);
             listBox1.Items.Clear();
             SyncMiniMapOverlayListFromMain();
             latestMapData = null;
@@ -1010,6 +1113,7 @@ namespace CgStairFinder
                 var previousMapCode = string.IsNullOrWhiteSpace(latestMapPath) ? null : Path.GetFileName(latestMapPath);
                 var mapChanged = !string.Equals(latestMapPath, currentMapPath, StringComparison.OrdinalIgnoreCase);
                 var mapPathStatusLabel = BuildMapPathStatusLabel(isSelectedWindow, usedLatestMapFallback, mapPathOffset);
+                UpdateMapPathProbeButtonVisibility(isSelectedWindow && usedLatestMapFallback);
 
                 mapName = ResolveMapNameForCurrentMap(currentMapCode, mapName, previousMapCode, mapChanged, isSelectedWindow);
                 Text = string.IsNullOrWhiteSpace(mapName) ? currentMapCode : mapName;
@@ -1072,7 +1176,7 @@ namespace CgStairFinder
                 return "(*)";
             }
 
-            if (!mapPathOffset.HasValue || mapPathOffset.Value == 4)
+            if (!mapPathOffset.HasValue || mapPathOffset.Value == 0)
             {
                 return string.Empty;
             }
@@ -1096,6 +1200,129 @@ namespace CgStairFinder
             Array.Resize(ref c, 16);
             Array.Reverse(c);
             label2.Text = string.Format("...{0}{1}", new string(c), suffix);
+        }
+
+        private async void ButtonLocateMapPath_Click(object sender, EventArgs e)
+        {
+            if (comboBox1.SelectedIndex <= 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "対象のゲームウィンドウを選択してください。",
+                    "メモリー特定",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var process = comboBox1.SelectedItem as Process;
+            if (process == null || process.HasExited)
+            {
+                MessageBox.Show(
+                    this,
+                    "対象プロセスが見つかりません。",
+                    "メモリー特定",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var originalText = buttonLocateMapPath.Text;
+            buttonLocateMapPath.Enabled = false;
+            buttonLocateMapPath.Text = "調査中...";
+
+            try
+            {
+                var result = await Task.Run(() => CgClientReader.ProbeMapPathAddress(process, Settings.Default.cgDir));
+                ShowMapPathProbeResult(result);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format("メモリー特定中に例外が発生しました。\n\n{0}", ex.Message),
+                    "メモリー特定",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                buttonLocateMapPath.Text = originalText;
+                buttonLocateMapPath.Enabled = true;
+            }
+        }
+
+        private void ShowMapPathProbeResult(MapPathProbeResult result)
+        {
+            if (result == null)
+            {
+                MessageBox.Show(
+                    this,
+                    "結果を取得できませんでした。",
+                    "メモリー特定結果",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var builder = new StringBuilder();
+            builder.AppendLine("=== メモリー特定結果 ===");
+            builder.AppendLine(string.Format("プロセス: {0} ({1})", result.ProcessName ?? string.Empty, result.ProcessId));
+            builder.AppendLine(string.Format("走査リージョン: {0}", result.RegionsScanned));
+            builder.AppendLine(string.Format("走査バイト数: {0}", FormatBytes(result.BytesScanned)));
+            builder.AppendLine(string.Format("候補数: {0}", result.CandidateCount));
+            if (result.StoppedByByteLimit)
+            {
+                builder.AppendLine("※ 走査上限に達したため途中で停止しました。");
+            }
+
+            if (result.Success)
+            {
+                builder.AppendLine();
+                builder.AppendLine("状態: 成功");
+                builder.AppendLine(string.Format("推定アドレス: 0x{0:X}", result.FoundAddress ?? 0));
+                builder.AppendLine(string.Format("基準オフセット: {0}{1}", (result.OffsetFromDefault ?? 0) >= 0 ? "+" : string.Empty, result.OffsetFromDefault ?? 0));
+                builder.AppendLine(string.Format("生パス: {0}", string.IsNullOrWhiteSpace(result.RawPath) ? "(empty)" : result.RawPath));
+                builder.AppendLine(string.Format("解決パス: {0}", string.IsNullOrWhiteSpace(result.ResolvedPath) ? "(empty)" : result.ResolvedPath));
+                builder.AppendLine(string.Format("解決ファイル存在: {0}", result.ResolvedPathExists ? "yes" : "no"));
+
+                MessageBox.Show(
+                    this,
+                    builder.ToString(),
+                    "メモリー特定結果",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("状態: 失敗");
+            if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+            {
+                builder.AppendLine(string.Format("原因: {0}", result.ErrorMessage));
+            }
+
+            MessageBox.Show(
+                this,
+                builder.ToString(),
+                "メモリー特定結果",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes < 1024)
+            {
+                return string.Format("{0} B", bytes);
+            }
+
+            if (bytes < 1024 * 1024)
+            {
+                return string.Format("{0:F1} KB", bytes / 1024d);
+            }
+
+            return string.Format("{0:F2} MB", bytes / 1024d / 1024d);
         }
 
         private void ListBox_DrawItem(object sender, DrawItemEventArgs e)
