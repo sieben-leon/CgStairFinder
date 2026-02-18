@@ -52,6 +52,7 @@ namespace CgStairFinder
         private CheckBox checkBoxGameOrientation;
         private Label labelMiniMapHint;
         private MiniMapOverlayController miniMapOverlayController;
+        private Timer pinExpiryTimer;
 
         private enum StairListItemType
         {
@@ -83,6 +84,18 @@ namespace CgStairFinder
         private void Main_Load(object sender, EventArgs e)
         {
             LoadLocalPins();
+            pinExpiryTimer = new Timer { Interval = 60 * 1000 };
+            pinExpiryTimer.Tick += PinExpiryTimer_Tick;
+            pinExpiryTimer.Start();
+            FormClosed += (s, e2) =>
+            {
+                if (pinExpiryTimer != null)
+                {
+                    pinExpiryTimer.Stop();
+                    pinExpiryTimer.Dispose();
+                    pinExpiryTimer = null;
+                }
+            };
             tableLayoutPanel2.Resize += TableLayoutPanel2_Resize;
             InitializeMiniMapInteractions();
             InitializeMiniMapOverlayController();
@@ -600,11 +613,36 @@ namespace CgStairFinder
             {
                 localPins[entry.Key] = entry.Value;
             }
+
+            PruneExpiredLocalPins(false);
         }
 
         private void SaveLocalPins()
         {
             LocalPinStore.Save(localPins);
+        }
+
+        private void PinExpiryTimer_Tick(object sender, EventArgs e)
+        {
+            PruneExpiredLocalPins(true);
+        }
+
+        private bool PruneExpiredLocalPins(bool refreshView)
+        {
+            var removed = MapPinCollectionService.RemoveExpiredPins(localPins, DateTime.Now);
+            if (removed <= 0)
+            {
+                return false;
+            }
+
+            SaveLocalPins();
+            if (refreshView)
+            {
+                RefreshStairListFromLatest();
+                RefreshMiniMap();
+            }
+
+            return true;
         }
 
         private void SetCgDirDisplayText()
@@ -1048,6 +1086,7 @@ namespace CgStairFinder
         private void Timer1_Tick(object sender, EventArgs e)
         {
             timer1.Interval = 500;
+            PruneExpiredLocalPins(false);
 
             var mapName = string.Empty;
             var mapFile = default(FileInfo);
@@ -1578,6 +1617,8 @@ namespace CgStairFinder
 
         private void ShowPinManagerDialog()
         {
+            PruneExpiredLocalPins(false);
+
             using (var form = new Form())
             using (var table = new TableLayoutPanel())
             using (var list = new ListBox())

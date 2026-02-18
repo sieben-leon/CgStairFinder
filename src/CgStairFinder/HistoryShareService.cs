@@ -78,6 +78,15 @@ namespace CgStairFinder
 
             [DataMember(Name = "detail")]
             public string Detail { get; set; }
+
+            [DataMember(Name = "createdAt", EmitDefaultValue = false)]
+            public DateTime CreatedAt { get; set; }
+
+            [DataMember(Name = "isTimed", EmitDefaultValue = false)]
+            public bool IsTimed { get; set; }
+
+            [DataMember(Name = "autoDeleteHours", EmitDefaultValue = false)]
+            public int AutoDeleteHours { get; set; }
         }
 
         [DataContract]
@@ -698,7 +707,10 @@ namespace CgStairFinder
                 East = normalized.East,
                 South = normalized.South,
                 Title = normalized.Title,
-                Detail = normalized.Detail ?? string.Empty
+                Detail = normalized.Detail ?? string.Empty,
+                CreatedAt = normalized.CreatedAt,
+                IsTimed = normalized.IsTimed,
+                AutoDeleteHours = normalized.AutoDeleteHours
             };
         }
 
@@ -714,7 +726,10 @@ namespace CgStairFinder
                 East = pin.East,
                 South = pin.South,
                 Title = pin.Title,
-                Detail = pin.Detail
+                Detail = pin.Detail,
+                CreatedAt = pin.CreatedAt,
+                IsTimed = pin.IsTimed,
+                AutoDeleteHours = pin.AutoDeleteHours
             });
         }
     }

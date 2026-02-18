@@ -17,27 +17,32 @@ namespace CgStairFinder
             using (var labelSouth = new Label())
             using (var labelTitle = new Label())
             using (var labelDetail = new Label())
+            using (var labelTimed = new Label())
             using (var inputEast = new NumericUpDown())
             using (var inputSouth = new NumericUpDown())
             using (var inputTitle = new TextBox())
             using (var inputDetail = new TextBox())
+            using (var timedPanel = new FlowLayoutPanel())
+            using (var checkTimed = new CheckBox())
+            using (var inputTimedHours = new NumericUpDown())
+            using (var labelTimedHours = new Label())
             using (var buttons = new FlowLayoutPanel())
             using (var buttonOk = new Button())
             using (var buttonCancel = new Button())
             {
-                form.Text = "ãƒ”ãƒ³ã‚’è¿½åŠ ";
+                form.Text = "ƒsƒ“‚ğ’Ç‰Á";
                 form.StartPosition = FormStartPosition.CenterParent;
                 form.FormBorderStyle = FormBorderStyle.FixedDialog;
                 form.MinimizeBox = false;
                 form.MaximizeBox = false;
-                form.ClientSize = new Size(420, 280);
+                form.ClientSize = new Size(440, 340);
                 form.Font = font;
 
                 table.Dock = DockStyle.Fill;
                 table.Padding = new Padding(10);
                 table.ColumnCount = 2;
-                table.RowCount = 6;
-                table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
+                table.RowCount = 7;
+                table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96F));
                 table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
                 table.RowStyles.Add(new RowStyle());
                 table.RowStyles.Add(new RowStyle());
@@ -45,14 +50,15 @@ namespace CgStairFinder
                 table.RowStyles.Add(new RowStyle());
                 table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
                 table.RowStyles.Add(new RowStyle());
+                table.RowStyles.Add(new RowStyle());
 
-                labelMap.Text = string.Format("ãƒãƒƒãƒ—: {0}", mapCode);
+                labelMap.Text = string.Format("ƒ}ƒbƒv: {0}", mapCode);
                 labelMap.AutoSize = true;
                 labelMap.Dock = DockStyle.Fill;
                 table.Controls.Add(labelMap, 0, 0);
                 table.SetColumnSpan(labelMap, 2);
 
-                labelEast.Text = "æ±";
+                labelEast.Text = "“Œ";
                 labelEast.TextAlign = ContentAlignment.MiddleLeft;
                 labelEast.Dock = DockStyle.Fill;
                 inputEast.Minimum = 0;
@@ -62,7 +68,7 @@ namespace CgStairFinder
                 table.Controls.Add(labelEast, 0, 1);
                 table.Controls.Add(inputEast, 1, 1);
 
-                labelSouth.Text = "å—";
+                labelSouth.Text = "“ì";
                 labelSouth.TextAlign = ContentAlignment.MiddleLeft;
                 labelSouth.Dock = DockStyle.Fill;
                 inputSouth.Minimum = 0;
@@ -73,7 +79,7 @@ namespace CgStairFinder
                 table.Controls.Add(inputSouth, 1, 2);
 
                 labelTitle.AutoSize = true;
-                labelTitle.Text = "ã‚¿ã‚¤ãƒˆãƒ«\r\n(5æ–‡å­—)";
+                labelTitle.Text = "ƒ^ƒCƒgƒ‹\r\n(5•¶š)";
                 labelTitle.TextAlign = ContentAlignment.MiddleLeft;
                 labelTitle.Dock = DockStyle.Fill;
                 inputTitle.MaxLength = 5;
@@ -81,7 +87,7 @@ namespace CgStairFinder
                 table.Controls.Add(labelTitle, 0, 3);
                 table.Controls.Add(inputTitle, 1, 3);
 
-                labelDetail.Text = "è©³ç´°";
+                labelDetail.Text = "Ú×";
                 labelDetail.TextAlign = ContentAlignment.MiddleLeft;
                 labelDetail.Dock = DockStyle.Fill;
                 inputDetail.Multiline = true;
@@ -90,21 +96,58 @@ namespace CgStairFinder
                 table.Controls.Add(labelDetail, 0, 4);
                 table.Controls.Add(inputDetail, 1, 4);
 
+                labelTimed.Text = "ŒÀ";
+                labelTimed.TextAlign = ContentAlignment.MiddleLeft;
+                labelTimed.Dock = DockStyle.Fill;
+
+                timedPanel.Dock = DockStyle.Fill;
+                timedPanel.FlowDirection = FlowDirection.LeftToRight;
+                timedPanel.WrapContents = false;
+
+                checkTimed.Text = "—LŒø";
+                checkTimed.AutoSize = true;
+                checkTimed.Margin = new Padding(0, 5, 8, 0);
+
+                inputTimedHours.Minimum = 1;
+                inputTimedHours.Maximum = 720;
+                inputTimedHours.Value = 24;
+                inputTimedHours.Width = 70;
+                inputTimedHours.Enabled = false;
+                inputTimedHours.Margin = new Padding(0, 2, 4, 0);
+
+                labelTimedHours.Text = "ŠÔŒã‚É©“®íœ";
+                labelTimedHours.AutoSize = true;
+                labelTimedHours.Margin = new Padding(0, 5, 0, 0);
+                labelTimedHours.Enabled = false;
+
+                checkTimed.CheckedChanged += (s, e) =>
+                {
+                    var enabled = checkTimed.Checked;
+                    inputTimedHours.Enabled = enabled;
+                    labelTimedHours.Enabled = enabled;
+                };
+
+                timedPanel.Controls.Add(checkTimed);
+                timedPanel.Controls.Add(inputTimedHours);
+                timedPanel.Controls.Add(labelTimedHours);
+                table.Controls.Add(labelTimed, 0, 5);
+                table.Controls.Add(timedPanel, 1, 5);
+
                 buttons.Dock = DockStyle.Fill;
                 buttons.FlowDirection = FlowDirection.RightToLeft;
                 buttons.WrapContents = false;
 
-                buttonOk.Text = "ä¿å­˜";
+                buttonOk.Text = "’Ç‰Á";
                 buttonOk.Width = 88;
                 buttonOk.DialogResult = DialogResult.OK;
 
-                buttonCancel.Text = "ã‚­ãƒ£ãƒ³ã‚»ãƒ«";
+                buttonCancel.Text = "ƒLƒƒƒ“ƒZƒ‹";
                 buttonCancel.Width = 88;
                 buttonCancel.DialogResult = DialogResult.Cancel;
 
                 buttons.Controls.Add(buttonOk);
                 buttons.Controls.Add(buttonCancel);
-                table.Controls.Add(buttons, 0, 5);
+                table.Controls.Add(buttons, 0, 6);
                 table.SetColumnSpan(buttons, 2);
 
                 form.Controls.Add(table);
@@ -121,15 +164,18 @@ namespace CgStairFinder
                     East = (int)inputEast.Value,
                     South = (int)inputSouth.Value,
                     Title = inputTitle.Text,
-                    Detail = inputDetail.Text
+                    Detail = inputDetail.Text,
+                    CreatedAt = DateTime.Now,
+                    IsTimed = checkTimed.Checked,
+                    AutoDeleteHours = checkTimed.Checked ? (int)inputTimedHours.Value : 0
                 });
 
                 if (normalized == null)
                 {
                     MessageBox.Show(
                         owner,
-                        "ã‚¿ã‚¤ãƒˆãƒ«ã‚’1ã€œ5æ–‡å­—ã§å…¥åŠ›ã—ã¦ãã ã•ã„ã€‚",
-                        "ãƒ¡ãƒƒã‚»ãƒ¼ã‚¸",
+                        "ƒ^ƒCƒgƒ‹‚ğ1?5•¶š‚Å“ü—Í‚µ‚Ä‚­‚¾‚³‚¢B",
+                        "ƒƒbƒZ[ƒW",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
                     return false;

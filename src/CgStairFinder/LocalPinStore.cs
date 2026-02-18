@@ -45,6 +45,15 @@ namespace CgStairFinder
 
             [DataMember(Name = "detail")]
             public string Detail { get; set; }
+
+            [DataMember(Name = "createdAt", EmitDefaultValue = false)]
+            public DateTime CreatedAt { get; set; }
+
+            [DataMember(Name = "isTimed", EmitDefaultValue = false)]
+            public bool IsTimed { get; set; }
+
+            [DataMember(Name = "autoDeleteHours", EmitDefaultValue = false)]
+            public int AutoDeleteHours { get; set; }
         }
 
         public static IDictionary<string, IList<MapPin>> Load()
@@ -180,7 +189,10 @@ namespace CgStairFinder
                 East = data.East,
                 South = data.South,
                 Title = data.Title,
-                Detail = data.Detail
+                Detail = data.Detail,
+                CreatedAt = data.CreatedAt,
+                IsTimed = data.IsTimed,
+                AutoDeleteHours = data.AutoDeleteHours
             });
         }
 
@@ -197,7 +209,10 @@ namespace CgStairFinder
                 East = normalized.East,
                 South = normalized.South,
                 Title = normalized.Title,
-                Detail = normalized.Detail ?? string.Empty
+                Detail = normalized.Detail ?? string.Empty,
+                CreatedAt = normalized.CreatedAt,
+                IsTimed = normalized.IsTimed,
+                AutoDeleteHours = normalized.AutoDeleteHours
             };
         }
     }

@@ -12,7 +12,9 @@ namespace CgStairFinder
                 return MapCode ?? string.Empty;
             }
 
-            return string.Format("{0} | Êù±{1}„ÄÅÂçó{2} -- {3}", MapCode, Pin.East, Pin.South, Pin.Title);
+            var elapsed = MapPinCollectionService.BuildElapsedAgoText(Pin.CreatedAt, System.DateTime.Now);
+            var elapsedText = string.IsNullOrWhiteSpace(elapsed) ? string.Empty : string.Format(" ({0})", elapsed);
+            return string.Format("{0} | ìå{1}ÅAìÏ{2} -- {3}{4}", MapCode, Pin.East, Pin.South, Pin.Title, elapsedText);
         }
     }
 }
